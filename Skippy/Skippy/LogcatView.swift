@@ -13,10 +13,7 @@ struct LogcatView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            LogcatScrollView(
-                text: logcatManager.logText,
-                shouldAutoScroll: $logcatManager.shouldAutoScroll
-            )
+            LogcatScrollView(text: logcatManager.logText)
         }
         .frame(minWidth: 600, minHeight: 400)
         .navigationTitle("Logcat")
@@ -26,16 +23,6 @@ struct LogcatView: View {
                     logcatManager.clearLog()
                 }) {
                     Label("Clear", systemImage: "trash")
-                }
-            }
-            ToolbarItem {
-                Button(action: {
-                    logcatManager.shouldAutoScroll.toggle()
-                }) {
-                    Label(
-                        logcatManager.shouldAutoScroll ? "Auto-scroll On" : "Auto-scroll Off",
-                        systemImage: logcatManager.shouldAutoScroll ? "arrow.down.circle.fill" : "arrow.down.circle"
-                    )
                 }
             }
         }
@@ -50,7 +37,6 @@ struct LogcatView: View {
 
 struct LogcatScrollView: NSViewRepresentable {
     let text: String
-    @Binding var shouldAutoScroll: Bool
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -71,15 +57,6 @@ struct LogcatScrollView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         
-        // Set up notification for scroll changes
-        NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { _ in
-            context.coordinator.checkScrollPosition(scrollView: scrollView)
-        }
-        
         // Scroll to bottom initially
         DispatchQueue.main.async {
             scrollView.documentView?.scroll(NSPoint(x: 0, y: (scrollView.documentView?.bounds.height ?? 0)))
@@ -95,10 +72,31 @@ struct LogcatScrollView: NSViewRepresentable {
         
         let wasAtBottom = context.coordinator.isScrolledToBottom(scrollView: scrollView)
         
+        // Get current scroll position and content height before updating text
+        let currentScrollPosition = scrollView.contentView.bounds.origin
+        let heightBefore = textView.layoutManager?.usedRect(for: textView.textContainer!).height ?? 0
+        
+        // Update the text
         textView.string = text
         
-        // Auto-scroll if we should
-        if shouldAutoScroll && (wasAtBottom || context.coordinator.isFirstUpdate) {
+        // Get content height after updating text
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+        let heightAfter = textView.layoutManager?.usedRect(for: textView.textContainer!).height ?? 0
+        
+        // Calculate height change
+        let contentHeightChange = heightAfter - heightBefore
+        
+        // Adjust scroll position if content height decreased and we're not at bottom
+        if contentHeightChange < 0 && !wasAtBottom {
+            DispatchQueue.main.async {
+                // Add the negative height change to maintain position
+                let adjustedY = max(0, currentScrollPosition.y + contentHeightChange)
+                scrollView.contentView.scroll(to: NSPoint(x: currentScrollPosition.x, y: adjustedY))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+        // Auto-scroll only if we were already at the bottom
+        else if wasAtBottom || context.coordinator.isFirstUpdate {
             DispatchQueue.main.async {
                 textView.scrollToEndOfDocument(nil)
             }
@@ -107,18 +105,12 @@ struct LogcatScrollView: NSViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(shouldAutoScroll: $shouldAutoScroll)
+        Coordinator()
     }
     
     class Coordinator {
-        @Binding var shouldAutoScroll: Bool
         var isFirstUpdate = true
         weak var scrollView: NSScrollView?
-        private var lastKnownScrollPosition: CGFloat = 0
-        
-        init(shouldAutoScroll: Binding<Bool>) {
-            _shouldAutoScroll = shouldAutoScroll
-        }
         
         func isScrolledToBottom(scrollView: NSScrollView) -> Bool {
             guard let documentView = scrollView.documentView else { return false }
@@ -130,21 +122,6 @@ struct LogcatScrollView: NSViewRepresentable {
             // Consider "at bottom" if within 10 points of the bottom
             return documentHeight - scrollPosition < 10
         }
-        
-        func checkScrollPosition(scrollView: NSScrollView) {
-            let currentScrollPosition = scrollView.contentView.bounds.origin.y
-            
-            // If user scrolled up, disable auto-scroll
-            if currentScrollPosition < lastKnownScrollPosition {
-                shouldAutoScroll = false
-            }
-            // If user scrolled to bottom, enable auto-scroll
-            else if isScrolledToBottom(scrollView: scrollView) {
-                shouldAutoScroll = true
-            }
-            
-            lastKnownScrollPosition = currentScrollPosition
-        }
     }
 }
 
@@ -152,7 +129,6 @@ struct LogcatScrollView: NSViewRepresentable {
 @MainActor
 class LogcatManager {
     var logText: String = ""
-    var shouldAutoScroll: Bool = true
     
     private var process: Process?
     private var outputPipe: Pipe?
@@ -218,7 +194,8 @@ class LogcatManager {
         
         // Keep only the last maxLines
         if lines.count > maxLines {
-            lines.removeFirst(lines.count - maxLines)
+            let linesToRemove = lines.count - maxLines
+            lines.removeFirst(linesToRemove)
         }
         
         logText = lines.joined(separator: "\n")
