@@ -1,134 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Represents a single logcat entry.
-struct LogEntry {
-    let rawText: String  // May contain multiple lines
-    let level: Level?
-    
-    enum Level: String, CaseIterable, Comparable {
-        case silent = "S"
-        case verbose = "V"
-        case debug = "D"
-        case info = "I"
-        case warning = "W"
-        case error = "E"
-        case fatal = "F"
-        
-        var displayName: String {
-            switch self {
-            case .silent: return "Silent"
-            case .verbose: return "Verbose"
-            case .debug: return "Debug"
-            case .info: return "Info"
-            case .warning: return "Warning"
-            case .error: return "Error"
-            case .fatal: return "Fatal"
-            }
-        }
-        
-        var color: NSColor {
-            switch self {
-            case .silent: return .clear
-            case .verbose: return .systemBlue
-            case .debug: return .systemGreen
-            case .info: return .labelColor
-            case .warning: return .systemOrange
-            case .error: return .systemRed
-            case .fatal: return .systemPurple
-            }
-        }
-        
-        var priority: Int {
-            switch self {
-            case .silent: return 0
-            case .verbose: return 1
-            case .debug: return 2
-            case .info: return 3
-            case .warning: return 4
-            case .error: return 5
-            case .fatal: return 6
-            }
-        }
-        
-        static func < (lhs: Level, rhs: Level) -> Bool {
-            lhs.priority < rhs.priority
-        }
-    }
-    
-    /// Regular expression pattern to match logcat format
-    /// Example: "02-07 23:48:36.411 10115 10119 I artd    : message"
-    static let logcatPattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
-    static let logcatRegex = try? NSRegularExpression(pattern: logcatPattern, options: .anchorsMatchLines)
-    
-    init(text: String) {
-        self.rawText = text
-        self.level = Self.parseLevel(from: text)
-    }
-    
-    private static func parseLevel(from text: String) -> Level? {
-        // Parse the first line to get the level
-        guard let firstLine = text.split(separator: "\n", maxSplits: 1).first,
-              let regex = logcatRegex,
-              let match = regex.firstMatch(in: String(firstLine), range: NSRange(location: 0, length: firstLine.utf16.count)),
-              match.numberOfRanges >= 2 else {
-            return nil
-        }
-        
-        let levelRange = match.range(at: 1)
-        guard let range = Range(levelRange, in: String(firstLine)) else {
-            return nil
-        }
-        
-        let levelString = String(String(firstLine)[range])
-        return Level(rawValue: levelString)
-    }
-    
-    /// Parse text into log entries (handling multi-line entries)
-    static func parseEntries(from text: String) -> [LogEntry] {
-        var entries: [LogEntry] = []
-        var currentEntry = ""
-        
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        
-        for line in lines {
-            let lineStr = String(line)
-            
-            // Check if this line starts a new log entry
-            if isLogcatLine(lineStr) {
-                // Save previous entry if it exists
-                if !currentEntry.isEmpty {
-                    entries.append(LogEntry(text: currentEntry))
-                }
-                currentEntry = lineStr
-            } else {
-                // Continuation of previous entry
-                if !currentEntry.isEmpty {
-                    currentEntry += "\n" + lineStr
-                }
-            }
-        }
-        
-        // Don't forget the last entry
-        if !currentEntry.isEmpty {
-            entries.append(LogEntry(text: currentEntry))
-        }
-        
-        return entries
-    }
-    
-    /// Check if a line starts a new logcat entry
-    static func isLogcatLine(_ line: String) -> Bool {
-        guard let regex = logcatRegex else { return false }
-        return regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) != nil
-    }
-    
-    /// Returns true if this entry matches the logcat format
-    var isLogcatFormat: Bool {
-        level != nil
-    }
-}
-
 /// Displays the tail of `adb logcat`.
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
@@ -136,18 +8,26 @@ struct LogcatView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            LogcatScrollView(
-                text: logcatManager.logText,
-                isAtBottom: $logcatManager.isAtBottom,
-                minLevel: minLevel
-            )
+            if let error = logcatManager.errorMessage {
+                Text(error)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                LogcatScrollView(
+                    entries: logcatManager.entries,
+                    isAtBottom: $logcatManager.isAtBottom,
+                    minLevel: minLevel
+                )
+            }
         }
         .frame(minWidth: 600, minHeight: 400)
         .navigationTitle("Logcat")
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Picker("", selection: $minLevel) {
-                    ForEach(LogEntry.Level.allCases, id: \.rawValue) { level in
+                    ForEach(LogcatEntry.Level.allCases, id: \.rawValue) { level in
                         Text(level.displayName).tag(level.rawValue)
                     }
                 }
@@ -172,8 +52,8 @@ struct LogcatView: View {
     }
 }
 
-struct LogcatScrollView: NSViewRepresentable {
-    let text: String
+private struct LogcatScrollView: NSViewRepresentable {
+    let entries: [LogcatEntry]
     @Binding var isAtBottom: Bool
     let minLevel: String
     
@@ -214,9 +94,9 @@ struct LogcatScrollView: NSViewRepresentable {
         guard let layoutManager = textView.layoutManager else { return }
         guard let textStorage = textView.textStorage else { return }
         
-        // Filter and colorize text based on minimum log level
-        let filteredText = filterLogcat(text, minLevel: minLevel)
-        let attributedString = colorizeLogcat(filteredText)
+        // Filter and colorize entries based on minimum log level
+        let filtered = filterEntries(entries, minLevel: minLevel)
+        let attributedString = colorizeEntries(filtered)
         
         // Update text storage
         textStorage.setAttributedString(attributedString)
@@ -229,45 +109,30 @@ struct LogcatScrollView: NSViewRepresentable {
         // Otherwise don't adjust scroll - user is reading old content
     }
     
-    private func filterLogcat(_ text: String, minLevel: String) -> String {
-        guard let minLogLevel = LogEntry.Level(rawValue: minLevel) else {
-            return text
+    private func filterEntries(_ entries: [LogcatEntry], minLevel: String) -> [LogcatEntry] {
+        guard let minLogLevel = LogcatEntry.Level(rawValue: minLevel) else {
+            return entries
         }
-        
-        let entries = LogEntry.parseEntries(from: text)
-        
-        let filteredEntries = entries.filter { entry in
-            guard let level = entry.level else {
-                return false  // Skip entries that don't match logcat format
-            }
+        return entries.filter { entry in
+            guard let level = entry.level else { return false }
             return level >= minLogLevel
         }
-        
-        return filteredEntries.map { $0.rawText }.joined(separator: "\n")
     }
-    
-    private func colorizeLogcat(_ text: String) -> NSAttributedString {
-        let attributedString = NSMutableAttributedString(string: text)
+
+    private func colorizeEntries(_ entries: [LogcatEntry]) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        
-        // Apply default font to entire string
-        attributedString.addAttribute(.font, value: font, range: NSRange(location: 0, length: attributedString.length))
-        
-        let entries = LogEntry.parseEntries(from: text)
-        var currentPosition = 0
-        
-        for entry in entries {
-            if let level = entry.level {
-                let entryLength = entry.rawText.utf16.count
-                let entryRange = NSRange(location: currentPosition, length: entryLength)
-                attributedString.addAttribute(.foregroundColor, value: level.color, range: entryRange)
+        let result = NSMutableAttributedString()
+
+        for (index, entry) in entries.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n"))
             }
-            
-            // Move position forward (entry text + newline separator)
-            currentPosition += entry.rawText.utf16.count + 1  // +1 for newline
+            let color = entry.level?.color ?? NSColor.labelColor
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            result.append(NSAttributedString(string: entry.rawText, attributes: attrs))
         }
-        
-        return attributedString
+
+        return result
     }
 
     func makeCoordinator() -> Coordinator {
@@ -296,7 +161,8 @@ struct LogcatScrollView: NSViewRepresentable {
 @Observable
 @MainActor
 class LogcatManager {
-    var logText: String = ""
+    private(set) var entries: [LogcatEntry] = []
+    var errorMessage: String?
     var isAtBottom: Bool = true {
         didSet {
             if isAtBottom != oldValue {
@@ -310,8 +176,6 @@ class LogcatManager {
     @ObservationIgnored
     private var outputPipe: Pipe?
     @ObservationIgnored
-    private var entries: [LogEntry] = []
-    @ObservationIgnored
     private var partialLine: String = ""  // For incomplete lines from stream
     @ObservationIgnored
     private var isPaused = false
@@ -323,7 +187,7 @@ class LogcatManager {
     func startLogcat() {
         // Find adb executable path
         guard let adbPath = findAdb() else {
-            self.logText = "Error: Could not find adb executable."
+            self.errorMessage = "Error: Could not find adb executable."
             return
         }
         isPaused = false
@@ -356,9 +220,7 @@ class LogcatManager {
         do {
             try process.run()
         } catch {
-            self.logText = "Error starting adb logcat: \(error.localizedDescription)\n"
-            self.logText += "ADB path used: \(adbPath)\n"
-            self.logText += "Make sure adb is properly installed."
+            self.errorMessage = "Error starting adb logcat: \(error.localizedDescription)\nADB path used: \(adbPath)\nMake sure adb is properly installed."
         }
     }
     
@@ -372,7 +234,7 @@ class LogcatManager {
     func clearLog() {
         entries.removeAll()
         partialLine = ""
-        logText = ""
+        errorMessage = nil
     }
 
     private func handleScrollPositionChange() {
@@ -386,7 +248,6 @@ class LogcatManager {
                 if entries.count > normalMaxEntries {
                     entries = Array(entries.suffix(normalMaxEntries))
                 }
-                logText = entries.map { $0.rawText }.joined(separator: "\n")
 
                 startLogcat()
             }
@@ -424,12 +285,12 @@ class LogcatManager {
         for line in completeLines {
             let lineStr = String(line)
             
-            if LogEntry.isLogcatLine(lineStr) {
+            if LogcatEntry.isLogcatLine(lineStr) {
                 // Start of new entry
-                entries.append(LogEntry(text: lineStr))
+                entries.append(LogcatEntry(text: lineStr))
             } else if let lastEntry = entries.last, !lineStr.isEmpty {
                 // Continuation of previous entry
-                entries[entries.count - 1] = LogEntry(text: lastEntry.rawText + "\n" + lineStr)
+                entries[entries.count - 1] = LogcatEntry(text: lastEntry.rawText + "\n" + lineStr)
             }
         }
         
@@ -443,8 +304,6 @@ class LogcatManager {
             isPaused = true
             outputPipe?.fileHandleForReading.readabilityHandler = nil
         }
-        
-        logText = entries.map { $0.rawText }.joined(separator: "\n")
     }
 
     private func findAdb() -> String? {
@@ -514,6 +373,135 @@ class LogcatManager {
         return nil
     }
 }
+
+/// Represents a single logcat entry.
+struct LogcatEntry {
+    let rawText: String  // May contain multiple lines
+    let level: Level?
+
+    enum Level: String, CaseIterable, Comparable {
+        case silent = "S"
+        case verbose = "V"
+        case debug = "D"
+        case info = "I"
+        case warning = "W"
+        case error = "E"
+        case fatal = "F"
+
+        var displayName: String {
+            switch self {
+            case .silent: return "Silent"
+            case .verbose: return "Verbose"
+            case .debug: return "Debug"
+            case .info: return "Info"
+            case .warning: return "Warning"
+            case .error: return "Error"
+            case .fatal: return "Fatal"
+            }
+        }
+
+        var color: NSColor {
+            switch self {
+            case .silent: return .clear
+            case .verbose: return .systemBlue
+            case .debug: return .systemGreen
+            case .info: return .labelColor
+            case .warning: return .systemOrange
+            case .error: return .systemRed
+            case .fatal: return .systemPurple
+            }
+        }
+
+        var priority: Int {
+            switch self {
+            case .silent: return 0
+            case .verbose: return 1
+            case .debug: return 2
+            case .info: return 3
+            case .warning: return 4
+            case .error: return 5
+            case .fatal: return 6
+            }
+        }
+
+        static func < (lhs: Level, rhs: Level) -> Bool {
+            lhs.priority < rhs.priority
+        }
+    }
+
+    /// Regular expression pattern to match logcat format
+    /// Example: "02-07 23:48:36.411 10115 10119 I artd    : message"
+    static let logcatPattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
+    static let logcatRegex = try? NSRegularExpression(pattern: logcatPattern, options: .anchorsMatchLines)
+
+    init(text: String) {
+        self.rawText = text
+        self.level = Self.parseLevel(from: text)
+    }
+
+    private static func parseLevel(from text: String) -> Level? {
+        // Parse the first line to get the level
+        guard let firstLine = text.split(separator: "\n", maxSplits: 1).first,
+              let regex = logcatRegex,
+              let match = regex.firstMatch(in: String(firstLine), range: NSRange(location: 0, length: firstLine.utf16.count)),
+              match.numberOfRanges >= 2 else {
+            return nil
+        }
+
+        let levelRange = match.range(at: 1)
+        guard let range = Range(levelRange, in: String(firstLine)) else {
+            return nil
+        }
+
+        let levelString = String(String(firstLine)[range])
+        return Level(rawValue: levelString)
+    }
+
+    /// Parse text into log entries (handling multi-line entries)
+    static func parseEntries(from text: String) -> [LogcatEntry] {
+        var entries: [LogcatEntry] = []
+        var currentEntry = ""
+
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+
+        for line in lines {
+            let lineStr = String(line)
+
+            // Check if this line starts a new log entry
+            if isLogcatLine(lineStr) {
+                // Save previous entry if it exists
+                if !currentEntry.isEmpty {
+                    entries.append(LogcatEntry(text: currentEntry))
+                }
+                currentEntry = lineStr
+            } else {
+                // Continuation of previous entry
+                if !currentEntry.isEmpty {
+                    currentEntry += "\n" + lineStr
+                }
+            }
+        }
+
+        // Don't forget the last entry
+        if !currentEntry.isEmpty {
+            entries.append(LogcatEntry(text: currentEntry))
+        }
+
+        return entries
+    }
+
+    /// Check if a line starts a new logcat entry
+    static func isLogcatLine(_ line: String) -> Bool {
+        guard let regex = logcatRegex else { return false }
+        return regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) != nil
+    }
+
+    /// Returns true if this entry matches the logcat format
+    var isLogcatFormat: Bool {
+        level != nil
+    }
+}
+
 
 #Preview {
     LogcatView()
