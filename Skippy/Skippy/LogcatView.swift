@@ -4,12 +4,39 @@ import AppKit
 /// Displays the tail of `adb logcat`.
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
+    @AppStorage("logcatMinLevel") private var minLevel: String = "V"
     
     var body: some View {
         VStack(spacing: 0) {
+            // Filter control
+            HStack {
+                Text("Min Level:")
+                    .font(.system(size: 11))
+                
+                Picker("", selection: $minLevel) {
+                    Text("Silent").tag("S")
+                    Text("Verbose").tag("V")
+                    Text("Debug").tag("D")
+                    Text("Info").tag("I")
+                    Text("Warning").tag("W")
+                    Text("Error").tag("E")
+                    Text("Fatal").tag("F")
+                }
+                .pickerStyle(.menu)
+                .frame(width: 120)
+                
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(nsColor: .controlBackgroundColor))
+            
+            Divider()
+            
             LogcatScrollView(
                 text: logcatManager.logText,
-                isAtBottom: $logcatManager.isAtBottom
+                isAtBottom: $logcatManager.isAtBottom,
+                minLevel: minLevel
             )
         }
         .frame(minWidth: 600, minHeight: 400)
@@ -35,6 +62,7 @@ struct LogcatView: View {
 struct LogcatScrollView: NSViewRepresentable {
     let text: String
     @Binding var isAtBottom: Bool
+    let minLevel: String
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -73,8 +101,9 @@ struct LogcatScrollView: NSViewRepresentable {
         guard let layoutManager = textView.layoutManager else { return }
         guard let textStorage = textView.textStorage else { return }
         
-        // Create attributed string with colorized log levels
-        let attributedString = colorizeLogcat(text)
+        // Filter and colorize text based on minimum log level
+        let filteredText = filterLogcat(text, minLevel: minLevel)
+        let attributedString = colorizeLogcat(filteredText)
         
         // Update text storage
         textStorage.setAttributedString(attributedString)
@@ -85,6 +114,46 @@ struct LogcatScrollView: NSViewRepresentable {
             textView.scrollToEndOfDocument(nil)
         }
         // Otherwise don't adjust scroll - user is reading old content
+    }
+    
+    private func filterLogcat(_ text: String, minLevel: String) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let minPriority = logLevelPriority(minLevel)
+        
+        let filteredLines = lines.filter { line in
+            // Extract log level from line
+            let pattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: String(line), range: NSRange(location: 0, length: line.utf16.count)),
+                  match.numberOfRanges >= 2 else {
+                // If line doesn't match logcat format, include it (might be continuation)
+                return true
+            }
+            
+            let levelRange = match.range(at: 1)
+            if let range = Range(levelRange, in: String(line)) {
+                let level = String(String(line)[range])
+                let priority = logLevelPriority(level)
+                return priority >= minPriority
+            }
+            
+            return true
+        }
+        
+        return filteredLines.joined(separator: "\n")
+    }
+    
+    private func logLevelPriority(_ level: String) -> Int {
+        switch level {
+        case "S": return 0  // Silent (lowest)
+        case "V": return 1  // Verbose
+        case "D": return 2  // Debug
+        case "I": return 3  // Info
+        case "W": return 4  // Warning
+        case "E": return 5  // Error
+        case "F": return 6  // Fatal (highest)
+        default: return 0
+        }
     }
     
     private func colorizeLogcat(_ text: String) -> NSAttributedString {
