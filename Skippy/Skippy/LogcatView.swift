@@ -8,11 +8,16 @@ struct LogcatView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Filter control
-            HStack {
-                Text("Min Level:")
-                    .font(.system(size: 11))
-                
+            LogcatScrollView(
+                text: logcatManager.logText,
+                isAtBottom: $logcatManager.isAtBottom,
+                minLevel: minLevel
+            )
+        }
+        .frame(minWidth: 600, minHeight: 400)
+        .navigationTitle("Logcat")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
                 Picker("", selection: $minLevel) {
                     Text("Silent").tag("S")
                     Text("Verbose").tag("V")
@@ -23,26 +28,10 @@ struct LogcatView: View {
                     Text("Fatal").tag("F")
                 }
                 .pickerStyle(.menu)
-                .frame(width: 120)
-                
-                Spacer()
+                .frame(width: 100)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor))
             
-            Divider()
-            
-            LogcatScrollView(
-                text: logcatManager.logText,
-                isAtBottom: $logcatManager.isAtBottom,
-                minLevel: minLevel
-            )
-        }
-        .frame(minWidth: 600, minHeight: 400)
-        .navigationTitle("Logcat")
-        .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .automatic) {
                 Button(action: {
                     logcatManager.clearLog()
                 }) {
