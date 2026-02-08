@@ -165,7 +165,7 @@ private struct LogcatScrollView: NSViewRepresentable {
         
         // Filter and colorize entries based on minimum log level
         let filtered = filterEntries(entries, minLevel: minLevel, filterText: filterText)
-        let attributedString = colorizeEntries(filtered)
+        let attributedString = colorizeEntries(filtered, highlightText: filterText)
         
         // Update text storage
         textStorage.setAttributedString(attributedString)
@@ -194,8 +194,9 @@ private struct LogcatScrollView: NSViewRepresentable {
         }
     }
 
-    private func colorizeEntries(_ entries: [LogcatEntry]) -> NSAttributedString {
+    private func colorizeEntries(_ entries: [LogcatEntry], highlightText: String) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let searchText = highlightText.trimmingCharacters(in: .whitespaces)
         let result = NSMutableAttributedString()
 
         for (index, entry) in entries.enumerated() {
@@ -204,7 +205,21 @@ private struct LogcatScrollView: NSViewRepresentable {
             }
             let color = entry.level?.color ?? NSColor.labelColor
             let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-            result.append(NSAttributedString(string: entry.rawText, attributes: attrs))
+            let entryStr = NSMutableAttributedString(string: entry.rawText, attributes: attrs)
+
+            if !searchText.isEmpty {
+                let text = entry.rawText as NSString
+                var searchRange = NSRange(location: 0, length: text.length)
+                while searchRange.location < text.length {
+                    let found = text.range(of: searchText, options: .caseInsensitive, range: searchRange)
+                    guard found.location != NSNotFound else { break }
+                    entryStr.addAttribute(.backgroundColor, value: NSColor.findHighlightColor, range: found)
+                    searchRange.location = found.location + found.length
+                    searchRange.length = text.length - searchRange.location
+                }
+            }
+
+            result.append(entryStr)
         }
 
         return result
