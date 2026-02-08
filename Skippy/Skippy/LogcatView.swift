@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Displays the tail of `adb logcat`.
 struct LogcatView: View {
@@ -44,6 +45,12 @@ struct LogcatView: View {
             }
             
             ToolbarItem(placement: .automatic) {
+                Button(action: saveLog) {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+            }
+
+            ToolbarItem(placement: .automatic) {
                 Button(action: {
                     logcatManager.clearLog()
                 }) {
@@ -56,6 +63,20 @@ struct LogcatView: View {
         }
         .onDisappear {
             logcatManager.stopLogcat()
+        }
+    }
+
+    private func saveLog() {
+        // Snapshot the buffer immediately so new output doesn't affect it
+        let snapshot = logcatManager.entries.map(\.rawText).joined(separator: "\n")
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "logcat.txt"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? snapshot.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 }
