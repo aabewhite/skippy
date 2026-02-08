@@ -10,7 +10,8 @@ import SwiftUI
 @main
 struct SkippyApp: App {
     @Environment(\.openWindow) private var openWindow
-    
+    @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -21,8 +22,27 @@ struct SkippyApp: App {
                     openWindow(id: "logcat")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
-                
+
                 Divider()
+            }
+
+            CommandGroup(after: .toolbar) {
+                Section {
+                    Button("Make Text Bigger") {
+                        fontSizeOffset += 1
+                    }
+                    .keyboardShortcut("+", modifiers: .command)
+
+                    Button("Make Text Normal Size") {
+                        fontSizeOffset = 0
+                    }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+
+                    Button("Make Text Smaller") {
+                        fontSizeOffset -= 1
+                    }
+                    .keyboardShortcut("-", modifiers: .command)
+                }
             }
         }
         

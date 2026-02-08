@@ -6,7 +6,13 @@ import UniformTypeIdentifiers
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
     @AppStorage("logcatMinLevel") private var minLevel: String = "V"
+    @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @State private var filterText: String = ""
+
+    private static let baseFontSize: CGFloat = 11
+    private var fontSize: CGFloat {
+        max(6, min(30, Self.baseFontSize + CGFloat(fontSizeOffset)))
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +27,8 @@ struct LogcatView: View {
                     entries: logcatManager.entries,
                     isAtBottom: $logcatManager.isAtBottom,
                     minLevel: minLevel,
-                    filterText: filterText
+                    filterText: filterText,
+                    fontSize: fontSize
                 )
             }
         }
@@ -125,6 +132,7 @@ private struct LogcatScrollView: NSViewRepresentable {
     @Binding var isAtBottom: Bool
     let minLevel: String
     let filterText: String
+    let fontSize: CGFloat
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -165,7 +173,7 @@ private struct LogcatScrollView: NSViewRepresentable {
         
         // Filter and colorize entries based on minimum log level
         let filtered = filterEntries(entries, minLevel: minLevel, filterText: filterText)
-        let attributedString = colorizeEntries(filtered, highlightText: filterText)
+        let attributedString = colorizeEntries(filtered, highlightText: filterText, fontSize: fontSize)
         
         // Update text storage
         textStorage.setAttributedString(attributedString)
@@ -194,8 +202,8 @@ private struct LogcatScrollView: NSViewRepresentable {
         }
     }
 
-    private func colorizeEntries(_ entries: [LogcatEntry], highlightText: String) -> NSAttributedString {
-        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private func colorizeEntries(_ entries: [LogcatEntry], highlightText: String, fontSize: CGFloat) -> NSAttributedString {
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let searchText = highlightText.trimmingCharacters(in: .whitespaces)
         let result = NSMutableAttributedString()
 
