@@ -1,6 +1,110 @@
 import SwiftUI
 import AppKit
 
+/// Represents a single logcat entry.
+struct LogEntry {
+    let rawLine: String
+    let level: Level?
+    
+    enum Level: String, CaseIterable, Comparable {
+        case silent = "S"
+        case verbose = "V"
+        case debug = "D"
+        case info = "I"
+        case warning = "W"
+        case error = "E"
+        case fatal = "F"
+        
+        var displayName: String {
+            switch self {
+            case .silent: return "Silent"
+            case .verbose: return "Verbose"
+            case .debug: return "Debug"
+            case .info: return "Info"
+            case .warning: return "Warning"
+            case .error: return "Error"
+            case .fatal: return "Fatal"
+            }
+        }
+        
+        var color: NSColor {
+            switch self {
+            case .silent: return .clear
+            case .verbose: return .systemBlue
+            case .debug: return .systemGreen
+            case .info: return .labelColor
+            case .warning: return .systemOrange
+            case .error: return .systemRed
+            case .fatal: return .systemPurple
+            }
+        }
+        
+        var priority: Int {
+            switch self {
+            case .silent: return 0
+            case .verbose: return 1
+            case .debug: return 2
+            case .info: return 3
+            case .warning: return 4
+            case .error: return 5
+            case .fatal: return 6
+            }
+        }
+        
+        static func < (lhs: Level, rhs: Level) -> Bool {
+            lhs.priority < rhs.priority
+        }
+    }
+    
+    /// Regular expression pattern to match logcat format
+    /// Example: "02-07 23:48:36.411 10115 10119 I artd    : message"
+    static let logcatPattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
+    static let logcatRegex = try? NSRegularExpression(pattern: logcatPattern, options: .anchorsMatchLines)
+    
+    init(line: String) {
+        self.rawLine = line
+        self.level = Self.parseLevel(from: line)
+    }
+    
+    private static func parseLevel(from line: String) -> Level? {
+        guard let regex = logcatRegex,
+              let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)),
+              match.numberOfRanges >= 2 else {
+            return nil
+        }
+        
+        let levelRange = match.range(at: 1)
+        guard let range = Range(levelRange, in: line) else {
+            return nil
+        }
+        
+        let levelString = String(line[range])
+        return Level(rawValue: levelString)
+    }
+    
+    /// Returns true if this entry matches the logcat format
+    var isLogcatFormat: Bool {
+        level != nil
+    }
+    
+    /// Returns the range of the entire log entry line for coloring
+    static func lineRange(in text: String, at location: Int) -> NSRange? {
+        let lineStart = location
+        var lineEnd = text.utf16.count
+        
+        let newlineRange = (text as NSString).rangeOfCharacter(
+            from: .newlines,
+            options: [],
+            range: NSRange(location: lineStart, length: text.utf16.count - lineStart)
+        )
+        if newlineRange.location != NSNotFound {
+            lineEnd = newlineRange.location
+        }
+        
+        return NSRange(location: lineStart, length: lineEnd - lineStart)
+    }
+}
+
 /// Displays the tail of `adb logcat`.
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
@@ -19,13 +123,9 @@ struct LogcatView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Picker("", selection: $minLevel) {
-                    Text("Silent").tag("S")
-                    Text("Verbose").tag("V")
-                    Text("Debug").tag("D")
-                    Text("Info").tag("I")
-                    Text("Warning").tag("W")
-                    Text("Error").tag("E")
-                    Text("Fatal").tag("F")
+                    ForEach(LogEntry.Level.allCases, id: \.rawValue) { level in
+                        Text(level.displayName).tag(level.rawValue)
+                    }
                 }
                 .pickerStyle(.menu)
                 .frame(width: 100)
@@ -106,43 +206,24 @@ struct LogcatScrollView: NSViewRepresentable {
     }
     
     private func filterLogcat(_ text: String, minLevel: String) -> String {
+        guard let minLogLevel = LogEntry.Level(rawValue: minLevel) else {
+            return text
+        }
+        
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let minPriority = logLevelPriority(minLevel)
         
         let filteredLines = lines.filter { line in
-            // Extract log level from line
-            let pattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
-            guard let regex = try? NSRegularExpression(pattern: pattern),
-                  let match = regex.firstMatch(in: String(line), range: NSRange(location: 0, length: line.utf16.count)),
-                  match.numberOfRanges >= 2 else {
-                // If line doesn't match logcat format, include it (might be continuation)
-                return true
+            let entry = LogEntry(line: String(line))
+            
+            // If line doesn't match logcat format, include it (might be continuation)
+            guard let level = entry.level else {
+                return !line.isEmpty
             }
             
-            let levelRange = match.range(at: 1)
-            if let range = Range(levelRange, in: String(line)) {
-                let level = String(String(line)[range])
-                let priority = logLevelPriority(level)
-                return priority >= minPriority
-            }
-            
-            return true
+            return level >= minLogLevel
         }
         
         return filteredLines.joined(separator: "\n")
-    }
-    
-    private func logLevelPriority(_ level: String) -> Int {
-        switch level {
-        case "S": return 0  // Silent (lowest)
-        case "V": return 1  // Verbose
-        case "D": return 2  // Debug
-        case "I": return 3  // Info
-        case "W": return 4  // Warning
-        case "E": return 5  // Error
-        case "F": return 6  // Fatal (highest)
-        default: return 0
-        }
     }
     
     private func colorizeLogcat(_ text: String) -> NSAttributedString {
@@ -152,69 +233,28 @@ struct LogcatScrollView: NSViewRepresentable {
         // Apply default font to entire string
         attributedString.addAttribute(.font, value: font, range: NSRange(location: 0, length: attributedString.length))
         
-        // Regular expression to match log level in logcat format
-        // Matches: timestamp pid tid LEVEL tag : message
-        // Example: "02-07 23:48:36.411 10115 10119 I artd    : message"
-        let pattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
-        
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines) else {
+        // Use LogEntry's regex to find matches
+        guard let regex = LogEntry.logcatRegex else {
             return attributedString
         }
         
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
         
         for match in matches {
-            // Get the log level character
-            if match.numberOfRanges >= 2 {
-                let levelRange = match.range(at: 1)
-                if let range = Range(levelRange, in: text) {
-                    let level = String(text[range])
-                    
-                    // Get the color for this log level
-                    let color = colorForLogLevel(level)
-                    
-                    // Apply color to the entire line
-                    // Find the end of this line
-                    let lineStart = match.range.location
-                    var lineEnd = text.utf16.count
-                    
-                    let newlineRange = (text as NSString).rangeOfCharacter(
-                        from: .newlines,
-                        options: [],
-                        range: NSRange(location: lineStart, length: text.utf16.count - lineStart)
-                    )
-                    if newlineRange.location != NSNotFound {
-                        lineEnd = newlineRange.location
-                    }
-                    
-                    let lineRange = NSRange(location: lineStart, length: lineEnd - lineStart)
-                    attributedString.addAttribute(.foregroundColor, value: color, range: lineRange)
+            // Parse the line at this location to get the LogEntry
+            if let lineRange = LogEntry.lineRange(in: text, at: match.range.location),
+               let range = Range(lineRange, in: text) {
+                let line = String(text[range])
+                let entry = LogEntry(line: line)
+                
+                // Apply color based on the entry's level
+                if let level = entry.level {
+                    attributedString.addAttribute(.foregroundColor, value: level.color, range: lineRange)
                 }
             }
         }
         
         return attributedString
-    }
-    
-    private func colorForLogLevel(_ level: String) -> NSColor {
-        switch level {
-        case "V": // Verbose
-            return NSColor.systemBlue
-        case "D": // Debug
-            return NSColor.systemGreen
-        case "I": // Info
-            return NSColor.labelColor
-        case "W": // Warning
-            return NSColor.systemOrange
-        case "E": // Error
-            return NSColor.systemRed
-        case "F": // Fatal
-            return NSColor.systemPurple
-        case "S": // Silent
-            return NSColor.clear
-        default:
-            return NSColor.labelColor
-        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -352,9 +392,11 @@ class LogcatManager {
         let newLines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         
         for line in newLines {
-            if !line.isEmpty || lines.last != "" {
-                lines.append(line)
+            // Skip completely empty lines unless it's truly part of the output
+            if line.isEmpty && (lines.isEmpty || lines.last == "") {
+                continue
             }
+            lines.append(line)
         }
         
         // Trim if needed (only when at bottom). We don't trim while not at
