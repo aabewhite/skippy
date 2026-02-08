@@ -1,19 +1,16 @@
-//
-//  LogcatView.swift
-//  Skippy
-//
-//  Created by Abe White on 2/7/26.
-//
-
 import SwiftUI
 import AppKit
 
+/// Displays the tail of `adb logcat`.
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
     
     var body: some View {
         VStack(spacing: 0) {
-            LogcatScrollView(text: logcatManager.logText)
+            LogcatScrollView(
+                text: logcatManager.logText,
+                isAtBottom: $logcatManager.isAtBottom
+            )
         }
         .frame(minWidth: 600, minHeight: 400)
         .navigationTitle("Logcat")
@@ -37,6 +34,7 @@ struct LogcatView: View {
 
 struct LogcatScrollView: NSViewRepresentable {
     let text: String
+    @Binding var isAtBottom: Bool
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -57,84 +55,82 @@ struct LogcatScrollView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         
-        // Scroll to bottom initially
-        DispatchQueue.main.async {
-            scrollView.documentView?.scroll(NSPoint(x: 0, y: (scrollView.documentView?.bounds.height ?? 0)))
+        // Track scroll position changes
+        NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak scrollView] _ in
+            guard let scrollView = scrollView else { return }
+            context.coordinator.updateScrollPosition(scrollView: scrollView, isAtBotomBinding: $isAtBottom)
         }
-        
-        context.coordinator.scrollView = scrollView
-        
         return scrollView
     }
     
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let layoutManager = textView.layoutManager else { return }
         
-        let wasAtBottom = context.coordinator.isScrolledToBottom(scrollView: scrollView)
-        
-        // Get current scroll position and content height before updating text
-        let currentScrollPosition = scrollView.contentView.bounds.origin
-        let heightBefore = textView.layoutManager?.usedRect(for: textView.textContainer!).height ?? 0
-        
-        // Update the text
+        // Update text
         textView.string = text
         
-        // Get content height after updating text
-        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
-        let heightAfter = textView.layoutManager?.usedRect(for: textView.textContainer!).height ?? 0
-        
-        // Calculate height change
-        let contentHeightChange = heightAfter - heightBefore
-        
-        // Adjust scroll position if content height decreased and we're not at bottom
-        if contentHeightChange < 0 && !wasAtBottom {
-            DispatchQueue.main.async {
-                // Add the negative height change to maintain position
-                let adjustedY = max(0, currentScrollPosition.y + contentHeightChange)
-                scrollView.contentView.scroll(to: NSPoint(x: currentScrollPosition.x, y: adjustedY))
-                scrollView.reflectScrolledClipView(scrollView.contentView)
-            }
+        // If we're at bottom, scroll to show new content
+        if isAtBottom {
+            layoutManager.ensureLayout(for: textView.textContainer!)
+            textView.scrollToEndOfDocument(nil)
         }
-        // Auto-scroll only if we were already at the bottom
-        else if wasAtBottom || context.coordinator.isFirstUpdate {
-            DispatchQueue.main.async {
-                textView.scrollToEndOfDocument(nil)
-            }
-            context.coordinator.isFirstUpdate = false
-        }
+        // Otherwise don't adjust scroll - user is reading old content
     }
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
     
     class Coordinator {
-        var isFirstUpdate = true
-        weak var scrollView: NSScrollView?
-        
-        func isScrolledToBottom(scrollView: NSScrollView) -> Bool {
-            guard let documentView = scrollView.documentView else { return false }
+        func updateScrollPosition(scrollView: NSScrollView, isAtBotomBinding: Binding<Bool>) {
+            guard let textView = scrollView.documentView else { return }
             
             let visibleRect = scrollView.contentView.bounds
-            let documentHeight = documentView.bounds.height
+            let textHeight = textView.bounds.height
             let scrollPosition = visibleRect.origin.y + visibleRect.height
             
             // Consider "at bottom" if within 10 points of the bottom
-            return documentHeight - scrollPosition < 10
+            let atBottom = textHeight - scrollPosition < 10
+            
+            if isAtBotomBinding.wrappedValue != atBottom {
+                isAtBotomBinding.wrappedValue = atBottom
+            }
         }
     }
 }
 
+/// Observable Logcat monitor.
 @Observable
 @MainActor
 class LogcatManager {
     var logText: String = ""
-    
+    var isAtBottom: Bool = true {
+        didSet {
+            if isAtBottom != oldValue {
+                handleScrollPositionChange()
+            }
+        }
+    }
+
+    @ObservationIgnored
     private var process: Process?
+    @ObservationIgnored
     private var outputPipe: Pipe?
-    private let maxLines = 4000
+    @ObservationIgnored
     private var lines: [String] = []
-    
+    @ObservationIgnored
+    private var isPaused = false
+
+    private let normalMaxLines = 4000
+    private let pausedMaxLines = 50_000
+    @ObservationIgnored
+    private var currentMaxLines = 4000
+
     func startLogcat() {
         // Find adb executable path
         guard let adbPath = findAdb() else {
@@ -181,9 +177,46 @@ class LogcatManager {
         process?.terminate()
         process = nil
         outputPipe = nil
+        isPaused = false
+    }
+    
+    private func handleScrollPositionChange() {
+        if isAtBottom {
+            // User scrolled back to bottom
+            if isPaused {
+                // Restart the process and reset to normal buffer size
+                restartLogcat()
+            }
+        } else {
+            // User scrolled away from bottom
+            if !isPaused {
+                // Increase buffer size to allow more history
+                currentMaxLines = pausedMaxLines
+            }
+        }
+    }
+    
+    private func restartLogcat() {
+        // Stop the current process
+        stopLogcat()
+        
+        // Reset buffer to normal size and trim if needed
+        currentMaxLines = normalMaxLines
+        if lines.count > normalMaxLines {
+            lines = Array(lines.suffix(normalMaxLines))
+        }
+        logText = lines.joined(separator: "\n")
+        
+        // Restart logcat
+        startLogcat()
     }
     
     private func appendOutput(_ output: String) {
+        // If we're paused and buffer is full, ignore new output
+        if isPaused && lines.count >= currentMaxLines {
+            return
+        }
+        
         let newLines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         
         for line in newLines {
@@ -192,10 +225,16 @@ class LogcatManager {
             }
         }
         
-        // Keep only the last maxLines
-        if lines.count > maxLines {
-            let linesToRemove = lines.count - maxLines
+        // Trim if needed (only when at bottom). We don't trim while not at
+        // bottom because the visible text will jump around, despite our best
+        // efforts at finding a way to maintain the viewport.
+        if isAtBottom && lines.count > currentMaxLines {
+            let linesToRemove = lines.count - currentMaxLines
             lines.removeFirst(linesToRemove)
+        } else if !isAtBottom && lines.count >= currentMaxLines {
+            // Buffer is full while not at bottom - pause listening
+            isPaused = true
+            outputPipe?.fileHandleForReading.readabilityHandler = nil
         }
         
         logText = lines.joined(separator: "\n")
@@ -204,6 +243,8 @@ class LogcatManager {
     func clearLog() {
         lines.removeAll()
         logText = ""
+        currentMaxLines = normalMaxLines
+        isPaused = false
     }
 
     private func findAdb() -> String? {
