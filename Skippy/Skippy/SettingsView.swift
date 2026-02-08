@@ -17,11 +17,10 @@ struct SettingsView: View {
                     Slider(value: Binding(
                         get: { Double(logcatBufferSize) },
                         set: { logcatBufferSize = Int($0) }
-                    ), in: 1000...10000, step: 1000) {
-                        Text("Buffer Size")
-                    }
+                    ), in: 1000...10000, step: 1000)
+                    .frame(maxWidth: .infinity)
 
-                    Text("\(logcatBufferSize) lines")
+                    Text("\(logcatBufferSize) entries")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

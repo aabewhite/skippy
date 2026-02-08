@@ -3,7 +3,7 @@ import AppKit
 
 /// Represents a single logcat entry.
 struct LogEntry {
-    let rawLine: String
+    let rawText: String  // May contain multiple lines
     let level: Level?
     
     enum Level: String, CaseIterable, Comparable {
@@ -61,47 +61,71 @@ struct LogEntry {
     static let logcatPattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
     static let logcatRegex = try? NSRegularExpression(pattern: logcatPattern, options: .anchorsMatchLines)
     
-    init(line: String) {
-        self.rawLine = line
-        self.level = Self.parseLevel(from: line)
+    init(text: String) {
+        self.rawText = text
+        self.level = Self.parseLevel(from: text)
     }
     
-    private static func parseLevel(from line: String) -> Level? {
-        guard let regex = logcatRegex,
-              let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)),
+    private static func parseLevel(from text: String) -> Level? {
+        // Parse the first line to get the level
+        guard let firstLine = text.split(separator: "\n", maxSplits: 1).first,
+              let regex = logcatRegex,
+              let match = regex.firstMatch(in: String(firstLine), range: NSRange(location: 0, length: firstLine.utf16.count)),
               match.numberOfRanges >= 2 else {
             return nil
         }
         
         let levelRange = match.range(at: 1)
-        guard let range = Range(levelRange, in: line) else {
+        guard let range = Range(levelRange, in: String(firstLine)) else {
             return nil
         }
         
-        let levelString = String(line[range])
+        let levelString = String(String(firstLine)[range])
         return Level(rawValue: levelString)
+    }
+    
+    /// Parse text into log entries (handling multi-line entries)
+    static func parseEntries(from text: String) -> [LogEntry] {
+        var entries: [LogEntry] = []
+        var currentEntry = ""
+        
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        
+        for line in lines {
+            let lineStr = String(line)
+            
+            // Check if this line starts a new log entry
+            if isLogcatLine(lineStr) {
+                // Save previous entry if it exists
+                if !currentEntry.isEmpty {
+                    entries.append(LogEntry(text: currentEntry))
+                }
+                currentEntry = lineStr
+            } else {
+                // Continuation of previous entry
+                if !currentEntry.isEmpty {
+                    currentEntry += "\n" + lineStr
+                }
+            }
+        }
+        
+        // Don't forget the last entry
+        if !currentEntry.isEmpty {
+            entries.append(LogEntry(text: currentEntry))
+        }
+        
+        return entries
+    }
+    
+    /// Check if a line starts a new logcat entry
+    static func isLogcatLine(_ line: String) -> Bool {
+        guard let regex = logcatRegex else { return false }
+        return regex.firstMatch(in: line, range: NSRange(location: 0, length: line.utf16.count)) != nil
     }
     
     /// Returns true if this entry matches the logcat format
     var isLogcatFormat: Bool {
         level != nil
-    }
-    
-    /// Returns the range of the entire log entry line for coloring
-    static func lineRange(in text: String, at location: Int) -> NSRange? {
-        let lineStart = location
-        var lineEnd = text.utf16.count
-        
-        let newlineRange = (text as NSString).rangeOfCharacter(
-            from: .newlines,
-            options: [],
-            range: NSRange(location: lineStart, length: text.utf16.count - lineStart)
-        )
-        if newlineRange.location != NSNotFound {
-            lineEnd = newlineRange.location
-        }
-        
-        return NSRange(location: lineStart, length: lineEnd - lineStart)
     }
 }
 
@@ -210,20 +234,16 @@ struct LogcatScrollView: NSViewRepresentable {
             return text
         }
         
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let entries = LogEntry.parseEntries(from: text)
         
-        let filteredLines = lines.filter { line in
-            let entry = LogEntry(line: String(line))
-            
-            // If line doesn't match logcat format, include it (might be continuation)
+        let filteredEntries = entries.filter { entry in
             guard let level = entry.level else {
-                return !line.isEmpty
+                return false  // Skip entries that don't match logcat format
             }
-            
             return level >= minLogLevel
         }
         
-        return filteredLines.joined(separator: "\n")
+        return filteredEntries.map { $0.rawText }.joined(separator: "\n")
     }
     
     private func colorizeLogcat(_ text: String) -> NSAttributedString {
@@ -233,25 +253,18 @@ struct LogcatScrollView: NSViewRepresentable {
         // Apply default font to entire string
         attributedString.addAttribute(.font, value: font, range: NSRange(location: 0, length: attributedString.length))
         
-        // Use LogEntry's regex to find matches
-        guard let regex = LogEntry.logcatRegex else {
-            return attributedString
-        }
+        let entries = LogEntry.parseEntries(from: text)
+        var currentPosition = 0
         
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
-        
-        for match in matches {
-            // Parse the line at this location to get the LogEntry
-            if let lineRange = LogEntry.lineRange(in: text, at: match.range.location),
-               let range = Range(lineRange, in: text) {
-                let line = String(text[range])
-                let entry = LogEntry(line: line)
-                
-                // Apply color based on the entry's level
-                if let level = entry.level {
-                    attributedString.addAttribute(.foregroundColor, value: level.color, range: lineRange)
-                }
+        for entry in entries {
+            if let level = entry.level {
+                let entryLength = entry.rawText.utf16.count
+                let entryRange = NSRange(location: currentPosition, length: entryLength)
+                attributedString.addAttribute(.foregroundColor, value: level.color, range: entryRange)
             }
+            
+            // Move position forward (entry text + newline separator)
+            currentPosition += entry.rawText.utf16.count + 1  // +1 for newline
         }
         
         return attributedString
@@ -297,12 +310,15 @@ class LogcatManager {
     @ObservationIgnored
     private var outputPipe: Pipe?
     @ObservationIgnored
-    private var lines: [String] = []
+    private var entries: [LogEntry] = []
+    @ObservationIgnored
+    private var partialLine: String = ""  // For incomplete lines from stream
     @ObservationIgnored
     private var isPaused = false
 
-    private let normalMaxLines = 4000
-    private let pausedMaxLines = 20_000
+    @ObservationIgnored
+    @AppStorage("logcatBufferSize") private var normalMaxEntries: Int = 4000
+    private let pausedMaxEntries = 20_000
 
     func startLogcat() {
         // Find adb executable path
@@ -354,7 +370,8 @@ class LogcatManager {
     }
 
     func clearLog() {
-        lines.removeAll()
+        entries.removeAll()
+        partialLine = ""
         logText = ""
     }
 
@@ -366,17 +383,17 @@ class LogcatManager {
 
                 // Restart the process and reset to normal buffer size
                 // Reset buffer to normal size and trim if needed
-                if lines.count > normalMaxLines {
-                    lines = Array(lines.suffix(normalMaxLines))
+                if entries.count > normalMaxEntries {
+                    entries = Array(entries.suffix(normalMaxEntries))
                 }
-                logText = lines.joined(separator: "\n")
+                logText = entries.map { $0.rawText }.joined(separator: "\n")
 
                 startLogcat()
             }
         } else {
             // User scrolled away from bottom
             // If buffer is already full, pause immediately
-            if !isPaused && lines.count >= pausedMaxLines {
+            if !isPaused && entries.count >= pausedMaxEntries {
                 isPaused = true
                 stopLogcat()
             }
@@ -389,29 +406,45 @@ class LogcatManager {
             return
         }
         
-        let newLines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // Combine with any partial line from previous read
+        let fullOutput = partialLine + output
+        let lines = fullOutput.split(separator: "\n", omittingEmptySubsequences: false)
         
-        for line in newLines {
-            // Skip completely empty lines unless it's truly part of the output
-            if line.isEmpty && (lines.isEmpty || lines.last == "") {
-                continue
+        // Check if output ends with newline
+        if output.hasSuffix("\n") {
+            partialLine = ""
+        } else {
+            // Last line is incomplete, save for next read
+            partialLine = String(lines.last ?? "")
+        }
+        
+        // Process complete lines
+        let completeLines = output.hasSuffix("\n") ? lines : lines.dropLast()
+        
+        for line in completeLines {
+            let lineStr = String(line)
+            
+            if LogEntry.isLogcatLine(lineStr) {
+                // Start of new entry
+                entries.append(LogEntry(text: lineStr))
+            } else if let lastEntry = entries.last, !lineStr.isEmpty {
+                // Continuation of previous entry
+                entries[entries.count - 1] = LogEntry(text: lastEntry.rawText + "\n" + lineStr)
             }
-            lines.append(line)
         }
         
         // Trim if needed (only when at bottom). We don't trim while not at
-        // bottom because the visible text will jump around, despite our best
-        // efforts at finding a way to maintain the viewport.
-        if isAtBottom && lines.count > normalMaxLines {
-            let linesToRemove = lines.count - normalMaxLines
-            lines.removeFirst(linesToRemove)
-        } else if !isAtBottom && lines.count >= pausedMaxLines {
+        // bottom because the visible text will jump around.
+        if isAtBottom && entries.count > normalMaxEntries {
+            let entriesToRemove = entries.count - normalMaxEntries
+            entries.removeFirst(entriesToRemove)
+        } else if !isAtBottom && entries.count >= pausedMaxEntries {
             // Buffer is full while not at bottom - pause listening
             isPaused = true
             outputPipe?.fileHandleForReading.readabilityHandler = nil
         }
         
-        logText = lines.joined(separator: "\n")
+        logText = entries.map { $0.rawText }.joined(separator: "\n")
     }
 
     private func findAdb() -> String? {
