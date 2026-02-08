@@ -127,9 +127,7 @@ class LogcatManager {
     private var isPaused = false
 
     private let normalMaxLines = 4000
-    private let pausedMaxLines = 50_000
-    @ObservationIgnored
-    private var currentMaxLines = 4000
+    private let pausedMaxLines = 4005
 
     func startLogcat() {
         // Find adb executable path
@@ -137,7 +135,8 @@ class LogcatManager {
             self.logText = "Error: Could not find adb executable."
             return
         }
-        
+        isPaused = false
+
         let process = Process()
         let pipe = Pipe()
         
@@ -177,43 +176,41 @@ class LogcatManager {
         process?.terminate()
         process = nil
         outputPipe = nil
-        isPaused = false
     }
-    
+
+    func clearLog() {
+        lines.removeAll()
+        logText = ""
+    }
+
     private func handleScrollPositionChange() {
         if isAtBottom {
             // User scrolled back to bottom
             if isPaused {
+                isPaused = false
+
                 // Restart the process and reset to normal buffer size
-                restartLogcat()
+                // Reset buffer to normal size and trim if needed
+                if lines.count > normalMaxLines {
+                    lines = Array(lines.suffix(normalMaxLines))
+                }
+                logText = lines.joined(separator: "\n")
+
+                startLogcat()
             }
         } else {
             // User scrolled away from bottom
-            if !isPaused {
-                // Increase buffer size to allow more history
-                currentMaxLines = pausedMaxLines
+            // If buffer is already full, pause immediately
+            if !isPaused && lines.count >= pausedMaxLines {
+                isPaused = true
+                stopLogcat()
             }
         }
     }
     
-    private func restartLogcat() {
-        // Stop the current process
-        stopLogcat()
-        
-        // Reset buffer to normal size and trim if needed
-        currentMaxLines = normalMaxLines
-        if lines.count > normalMaxLines {
-            lines = Array(lines.suffix(normalMaxLines))
-        }
-        logText = lines.joined(separator: "\n")
-        
-        // Restart logcat
-        startLogcat()
-    }
-    
     private func appendOutput(_ output: String) {
-        // If we're paused and buffer is full, ignore new output
-        if isPaused && lines.count >= currentMaxLines {
+        // If we're paused, ignore new output
+        if isPaused {
             return
         }
         
@@ -228,23 +225,16 @@ class LogcatManager {
         // Trim if needed (only when at bottom). We don't trim while not at
         // bottom because the visible text will jump around, despite our best
         // efforts at finding a way to maintain the viewport.
-        if isAtBottom && lines.count > currentMaxLines {
-            let linesToRemove = lines.count - currentMaxLines
+        if isAtBottom && lines.count > normalMaxLines {
+            let linesToRemove = lines.count - normalMaxLines
             lines.removeFirst(linesToRemove)
-        } else if !isAtBottom && lines.count >= currentMaxLines {
+        } else if !isAtBottom && lines.count >= pausedMaxLines {
             // Buffer is full while not at bottom - pause listening
             isPaused = true
             outputPipe?.fileHandleForReading.readabilityHandler = nil
         }
         
         logText = lines.joined(separator: "\n")
-    }
-    
-    func clearLog() {
-        lines.removeAll()
-        logText = ""
-        currentMaxLines = normalMaxLines
-        isPaused = false
     }
 
     private func findAdb() -> String? {
