@@ -5,6 +5,7 @@ import AppKit
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
     @AppStorage("logcatMinLevel") private var minLevel: String = "V"
+    @State private var filterText: String = ""
     
     var body: some View {
         VStack(spacing: 0) {
@@ -18,13 +19,20 @@ struct LogcatView: View {
                 LogcatScrollView(
                     entries: logcatManager.entries,
                     isAtBottom: $logcatManager.isAtBottom,
-                    minLevel: minLevel
+                    minLevel: minLevel,
+                    filterText: filterText
                 )
             }
         }
         .frame(minWidth: 600, minHeight: 400)
         .navigationTitle("Logcat")
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                TextField("Filter", text: $filterText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+
             ToolbarItem(placement: .automatic) {
                 Picker("", selection: $minLevel) {
                     ForEach(LogcatEntry.Level.allCases, id: \.rawValue) { level in
@@ -56,6 +64,7 @@ private struct LogcatScrollView: NSViewRepresentable {
     let entries: [LogcatEntry]
     @Binding var isAtBottom: Bool
     let minLevel: String
+    let filterText: String
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -95,7 +104,7 @@ private struct LogcatScrollView: NSViewRepresentable {
         guard let textStorage = textView.textStorage else { return }
         
         // Filter and colorize entries based on minimum log level
-        let filtered = filterEntries(entries, minLevel: minLevel)
+        let filtered = filterEntries(entries, minLevel: minLevel, filterText: filterText)
         let attributedString = colorizeEntries(filtered)
         
         // Update text storage
@@ -109,13 +118,19 @@ private struct LogcatScrollView: NSViewRepresentable {
         // Otherwise don't adjust scroll - user is reading old content
     }
     
-    private func filterEntries(_ entries: [LogcatEntry], minLevel: String) -> [LogcatEntry] {
-        guard let minLogLevel = LogcatEntry.Level(rawValue: minLevel) else {
-            return entries
-        }
+    private func filterEntries(_ entries: [LogcatEntry], minLevel: String, filterText: String) -> [LogcatEntry] {
+        let minLogLevel = LogcatEntry.Level(rawValue: minLevel)
+        let searchText = filterText.trimmingCharacters(in: .whitespaces)
         return entries.filter { entry in
-            guard let level = entry.level else { return false }
-            return level >= minLogLevel
+            if let minLogLevel, let level = entry.level {
+                guard level >= minLogLevel else { return false }
+            } else if minLogLevel != nil {
+                return false
+            }
+            if !searchText.isEmpty {
+                guard entry.rawText.localizedCaseInsensitiveContains(searchText) else { return false }
+            }
+            return true
         }
     }
 
