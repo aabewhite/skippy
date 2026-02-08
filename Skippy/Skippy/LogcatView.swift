@@ -126,7 +126,8 @@ class LogcatManager {
     @ObservationIgnored
     private var isPaused = false
 
-    private let normalMaxLines = 4000
+    @ObservationIgnored
+    @AppStorage("logcatBufferSize") private var normalMaxLines: Int = 4000
     private let pausedMaxLines = 50_000
 
     func startLogcat() {

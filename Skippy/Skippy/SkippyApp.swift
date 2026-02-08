@@ -28,5 +28,9 @@ struct SkippyApp: App {
             LogcatView()
         }
         .defaultSize(width: 800, height: 600)
+        
+        Settings {
+            SettingsView()
+        }
     }
 }
