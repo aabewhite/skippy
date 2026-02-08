@@ -129,6 +129,12 @@ struct LogcatView: View {
                 currentMatchIndex = totalMatchCount - 1
             }
         }
+        .focusedSceneValue(\.searchCommands, SearchCommands(
+            activate: { activateSearch() },
+            next: { advanceMatch(forward: true) },
+            previous: { advanceMatch(forward: false) },
+            hasMatches: isSearchVisible && totalMatchCount > 0
+        ))
     }
 
     private func activateSearch() {
@@ -209,6 +215,24 @@ struct LogcatView: View {
             }
             return true
         }
+    }
+}
+
+struct SearchCommands {
+    var activate: () -> Void
+    var next: () -> Void
+    var previous: () -> Void
+    var hasMatches: Bool
+}
+
+private struct SearchCommandsKey: FocusedValueKey {
+    typealias Value = SearchCommands
+}
+
+extension FocusedValues {
+    var searchCommands: SearchCommands? {
+        get { self[SearchCommandsKey.self] }
+        set { self[SearchCommandsKey.self] = newValue }
     }
 }
 
@@ -752,7 +776,3 @@ struct LogcatEntry {
     }
 }
 
-
-#Preview {
-    LogcatView()
-}

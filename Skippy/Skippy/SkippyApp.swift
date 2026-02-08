@@ -11,6 +11,7 @@ import SwiftUI
 struct SkippyApp: App {
     @Environment(\.openWindow) private var openWindow
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
+    @FocusedValue(\.searchCommands) private var searchCommands
 
     var body: some Scene {
         WindowGroup {
@@ -24,6 +25,28 @@ struct SkippyApp: App {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
 
                 Divider()
+            }
+
+            CommandGroup(after: .pasteboard) {
+                Menu("Find") {
+                    Button("Find...") {
+                        searchCommands?.activate()
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(searchCommands == nil)
+
+                    Button("Find Next") {
+                        searchCommands?.next()
+                    }
+                    .keyboardShortcut("g", modifiers: .command)
+                    .disabled(searchCommands?.hasMatches != true)
+
+                    Button("Find Previous") {
+                        searchCommands?.previous()
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .disabled(searchCommands?.hasMatches != true)
+                }
             }
 
             CommandGroup(after: .toolbar) {
