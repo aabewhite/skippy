@@ -48,6 +48,7 @@ struct LogcatScrollView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        textView.backgroundColor = NSColor.textBackgroundColor
         
         // Configure scroll view
         scrollView.documentView = textView
@@ -70,9 +71,13 @@ struct LogcatScrollView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         guard let layoutManager = textView.layoutManager else { return }
+        guard let textStorage = textView.textStorage else { return }
         
-        // Update text
-        textView.string = text
+        // Create attributed string with colorized log levels
+        let attributedString = colorizeLogcat(text)
+        
+        // Update text storage
+        textStorage.setAttributedString(attributedString)
         
         // If we're at bottom, scroll to show new content
         if isAtBottom {
@@ -80,6 +85,78 @@ struct LogcatScrollView: NSViewRepresentable {
             textView.scrollToEndOfDocument(nil)
         }
         // Otherwise don't adjust scroll - user is reading old content
+    }
+    
+    private func colorizeLogcat(_ text: String) -> NSAttributedString {
+        let attributedString = NSMutableAttributedString(string: text)
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        
+        // Apply default font to entire string
+        attributedString.addAttribute(.font, value: font, range: NSRange(location: 0, length: attributedString.length))
+        
+        // Regular expression to match log level in logcat format
+        // Matches: timestamp pid tid LEVEL tag : message
+        // Example: "02-07 23:48:36.411 10115 10119 I artd    : message"
+        let pattern = #"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+\d+\s+\d+\s+([VDIWEFS])\s"#
+        
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines) else {
+            return attributedString
+        }
+        
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: text.utf16.count))
+        
+        for match in matches {
+            // Get the log level character
+            if match.numberOfRanges >= 2 {
+                let levelRange = match.range(at: 1)
+                if let range = Range(levelRange, in: text) {
+                    let level = String(text[range])
+                    
+                    // Get the color for this log level
+                    let color = colorForLogLevel(level)
+                    
+                    // Apply color to the entire line
+                    // Find the end of this line
+                    let lineStart = match.range.location
+                    var lineEnd = text.utf16.count
+                    
+                    let newlineRange = (text as NSString).rangeOfCharacter(
+                        from: .newlines,
+                        options: [],
+                        range: NSRange(location: lineStart, length: text.utf16.count - lineStart)
+                    )
+                    if newlineRange.location != NSNotFound {
+                        lineEnd = newlineRange.location
+                    }
+                    
+                    let lineRange = NSRange(location: lineStart, length: lineEnd - lineStart)
+                    attributedString.addAttribute(.foregroundColor, value: color, range: lineRange)
+                }
+            }
+        }
+        
+        return attributedString
+    }
+    
+    private func colorForLogLevel(_ level: String) -> NSColor {
+        switch level {
+        case "V": // Verbose
+            return NSColor.systemBlue
+        case "D": // Debug
+            return NSColor.systemGreen
+        case "I": // Info
+            return NSColor.labelColor
+        case "W": // Warning
+            return NSColor.systemOrange
+        case "E": // Error
+            return NSColor.systemRed
+        case "F": // Fatal
+            return NSColor.systemPurple
+        case "S": // Silent
+            return NSColor.clear
+        default:
+            return NSColor.labelColor
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -126,8 +203,7 @@ class LogcatManager {
     @ObservationIgnored
     private var isPaused = false
 
-    @ObservationIgnored
-    @AppStorage("logcatBufferSize") private var normalMaxLines: Int = 4000
+    private let normalMaxLines = 4000
     private let pausedMaxLines = 50_000
 
     func startLogcat() {
