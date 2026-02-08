@@ -8,6 +8,10 @@ struct LogcatView: View {
     @AppStorage("logcatMinLevel") private var minLevel: String = "V"
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @State private var filterText: String = ""
+    @State private var isSearchVisible = false
+    @State private var searchText = ""
+    @State private var currentMatchIndex = 0
+    @State private var totalMatchCount = 0
 
     private static let baseFontSize: CGFloat = 11
     private var fontSize: CGFloat {
@@ -28,7 +32,10 @@ struct LogcatView: View {
                     isAtBottom: $logcatManager.isAtBottom,
                     minLevel: minLevel,
                     filterText: filterText,
-                    fontSize: fontSize
+                    fontSize: fontSize,
+                    searchText: isSearchVisible ? searchText : "",
+                    currentMatchIndex: currentMatchIndex,
+                    totalMatchCount: $totalMatchCount
                 )
             }
         }
@@ -64,12 +71,75 @@ struct LogcatView: View {
                     Label("Clear", systemImage: "trash")
                 }
             }
+
+            ToolbarItem(placement: .automatic) {
+                if isSearchVisible {
+                    HStack(spacing: 4) {
+                        TextField("Search", text: $searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 160)
+                            .onSubmit { advanceMatch(forward: true) }
+                        Text(totalMatchCount > 0 ? "\(currentMatchIndex + 1)/\(totalMatchCount)" : "0/0")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .center)
+                        Button(action: { advanceMatch(forward: false) }) {
+                            Image(systemName: "chevron.up")
+                        }
+                        .disabled(totalMatchCount == 0)
+                        Button(action: { advanceMatch(forward: true) }) {
+                            Image(systemName: "chevron.down")
+                        }
+                        .disabled(totalMatchCount == 0)
+                        Button(action: dismissSearch) {
+                            Image(systemName: "xmark")
+                        }
+                    }
+                } else {
+                    Button(action: activateSearch) {
+                        Label("Search", systemImage: "magnifyingglass")
+                    }
+                }
+            }
         }
         .onAppear {
             logcatManager.startLogcat()
         }
         .onDisappear {
             logcatManager.stopLogcat()
+        }
+        .onChange(of: searchText) {
+            currentMatchIndex = 0
+        }
+        .onChange(of: totalMatchCount) {
+            if totalMatchCount == 0 {
+                currentMatchIndex = 0
+            } else if currentMatchIndex >= totalMatchCount {
+                currentMatchIndex = totalMatchCount - 1
+            }
+        }
+    }
+
+    private func activateSearch() {
+        isSearchVisible = true
+        logcatManager.isSearchActive = true
+    }
+
+    private func dismissSearch() {
+        isSearchVisible = false
+        searchText = ""
+        currentMatchIndex = 0
+        totalMatchCount = 0
+        logcatManager.isSearchActive = false
+    }
+
+    private func advanceMatch(forward: Bool) {
+        guard totalMatchCount > 0 else { return }
+        if forward {
+            currentMatchIndex = (currentMatchIndex + 1) % totalMatchCount
+        } else {
+            currentMatchIndex = (currentMatchIndex - 1 + totalMatchCount) % totalMatchCount
         }
     }
 
@@ -133,6 +203,9 @@ private struct LogcatScrollView: NSViewRepresentable {
     let minLevel: String
     let filterText: String
     let fontSize: CGFloat
+    let searchText: String
+    let currentMatchIndex: Int
+    @Binding var totalMatchCount: Int
     
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -169,21 +242,42 @@ private struct LogcatScrollView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         guard let layoutManager = textView.layoutManager else { return }
+        guard let textContainer = textView.textContainer else { return }
         guard let textStorage = textView.textStorage else { return }
-        
+
         // Filter and colorize entries based on minimum log level
         let filtered = filterEntries(entries, minLevel: minLevel, filterText: filterText)
-        let attributedString = colorizeEntries(filtered, highlightText: filterText, fontSize: fontSize)
-        
+        let colorized = colorizeEntries(filtered, highlightText: filterText, searchText: searchText, currentMatchIndex: currentMatchIndex, fontSize: fontSize)
+
         // Update text storage
-        textStorage.setAttributedString(attributedString)
-        
-        // If we're at bottom, scroll to show new content
-        if isAtBottom {
-            layoutManager.ensureLayout(for: textView.textContainer!)
+        textStorage.setAttributedString(colorized.attributedString)
+
+        // Write back total match count (deferred to avoid re-render loop)
+        let newCount = colorized.searchMatchRanges.count
+        if newCount != totalMatchCount {
+            DispatchQueue.main.async {
+                self.totalMatchCount = newCount
+            }
+        }
+
+        // Search scroll takes priority over auto-scroll-to-bottom
+        let searchTerm = searchText.trimmingCharacters(in: .whitespaces)
+        if !searchTerm.isEmpty && currentMatchIndex < colorized.searchMatchRanges.count {
+            let matchRange = colorized.searchMatchRanges[currentMatchIndex]
+            layoutManager.ensureLayout(for: textContainer)
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: matchRange, actualCharacterRange: nil)
+            let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+                .offsetBy(dx: textView.textContainerInset.width, dy: textView.textContainerInset.height)
+
+            context.coordinator.isProgrammaticScroll = true
+            textView.scrollToVisible(rect.insetBy(dx: 0, dy: -20))
+            DispatchQueue.main.async {
+                context.coordinator.isProgrammaticScroll = false
+            }
+        } else if isAtBottom {
+            layoutManager.ensureLayout(for: textContainer)
             textView.scrollToEndOfDocument(nil)
         }
-        // Otherwise don't adjust scroll - user is reading old content
     }
     
     private func filterEntries(_ entries: [LogcatEntry], minLevel: String, filterText: String) -> [LogcatEntry] {
@@ -202,35 +296,66 @@ private struct LogcatScrollView: NSViewRepresentable {
         }
     }
 
-    private func colorizeEntries(_ entries: [LogcatEntry], highlightText: String, fontSize: CGFloat) -> NSAttributedString {
+    private struct ColorizeResult {
+        let attributedString: NSAttributedString
+        let searchMatchRanges: [NSRange]
+    }
+
+    private func colorizeEntries(_ entries: [LogcatEntry], highlightText: String, searchText: String, currentMatchIndex: Int, fontSize: CGFloat) -> ColorizeResult {
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let searchText = highlightText.trimmingCharacters(in: .whitespaces)
+        let filterTerm = highlightText.trimmingCharacters(in: .whitespaces)
+        let searchTerm = searchText.trimmingCharacters(in: .whitespaces)
         let result = NSMutableAttributedString()
+        var searchMatchRanges: [NSRange] = []
 
         for (index, entry) in entries.enumerated() {
             if index > 0 {
                 result.append(NSAttributedString(string: "\n"))
             }
+            let globalOffset = result.length
             let color = entry.level?.color ?? NSColor.labelColor
             let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let entryStr = NSMutableAttributedString(string: entry.rawText, attributes: attrs)
 
-            if !searchText.isEmpty {
+            // Filter text highlighting
+            if !filterTerm.isEmpty {
                 let text = entry.rawText as NSString
-                var searchRange = NSRange(location: 0, length: text.length)
-                while searchRange.location < text.length {
-                    let found = text.range(of: searchText, options: .caseInsensitive, range: searchRange)
+                var range = NSRange(location: 0, length: text.length)
+                while range.location < text.length {
+                    let found = text.range(of: filterTerm, options: .caseInsensitive, range: range)
                     guard found.location != NSNotFound else { break }
                     entryStr.addAttribute(.backgroundColor, value: NSColor.findHighlightColor, range: found)
-                    searchRange.location = found.location + found.length
-                    searchRange.length = text.length - searchRange.location
+                    range.location = found.location + found.length
+                    range.length = text.length - range.location
+                }
+            }
+
+            // Search text highlighting (overwrites filter highlight where they overlap)
+            if !searchTerm.isEmpty {
+                let text = entry.rawText as NSString
+                var range = NSRange(location: 0, length: text.length)
+                while range.location < text.length {
+                    let found = text.range(of: searchTerm, options: .caseInsensitive, range: range)
+                    guard found.location != NSNotFound else { break }
+                    let globalRange = NSRange(location: globalOffset + found.location, length: found.length)
+                    let matchIdx = searchMatchRanges.count
+                    searchMatchRanges.append(globalRange)
+
+                    if matchIdx == currentMatchIndex {
+                        entryStr.addAttribute(.backgroundColor, value: NSColor.controlAccentColor, range: found)
+                        entryStr.addAttribute(.foregroundColor, value: NSColor.white, range: found)
+                    } else {
+                        entryStr.addAttribute(.backgroundColor, value: NSColor.findHighlightColor, range: found)
+                    }
+                    range.location = found.location + found.length
+                    range.length = text.length - range.location
                 }
             }
 
             result.append(entryStr)
         }
 
-        return result
+        return ColorizeResult(attributedString: result, searchMatchRanges: searchMatchRanges)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -238,16 +363,20 @@ private struct LogcatScrollView: NSViewRepresentable {
     }
     
     class Coordinator {
+        var isProgrammaticScroll = false
+
         func updateScrollPosition(scrollView: NSScrollView, isAtBotomBinding: Binding<Bool>) {
+            if isProgrammaticScroll { return }
+
             guard let textView = scrollView.documentView else { return }
-            
+
             let visibleRect = scrollView.contentView.bounds
             let textHeight = textView.bounds.height
             let scrollPosition = visibleRect.origin.y + visibleRect.height
-            
+
             // Consider "at bottom" if within 10 points of the bottom
             let atBottom = textHeight - scrollPosition < 10
-            
+
             if isAtBotomBinding.wrappedValue != atBottom {
                 isAtBotomBinding.wrappedValue = atBottom
             }
@@ -264,10 +393,19 @@ class LogcatManager {
     var isAtBottom: Bool = true {
         didSet {
             if isAtBottom != oldValue {
-                handleScrollPositionChange()
+                handlePreservationStateChange()
             }
         }
     }
+    var isSearchActive: Bool = false {
+        didSet {
+            if isSearchActive != oldValue {
+                handlePreservationStateChange()
+            }
+        }
+    }
+
+    private var shouldPreserveBuffer: Bool { !isAtBottom || isSearchActive }
 
     @ObservationIgnored
     private var process: Process?
@@ -335,13 +473,12 @@ class LogcatManager {
         errorMessage = nil
     }
 
-    private func handleScrollPositionChange() {
-        if isAtBottom {
-            // User scrolled back to bottom
+    private func handlePreservationStateChange() {
+        if !shouldPreserveBuffer {
+            // No longer need to preserve — resume if paused
             if isPaused {
                 isPaused = false
 
-                // Restart the process and reset to normal buffer size
                 // Reset buffer to normal size and trim if needed
                 if entries.count > normalMaxEntries {
                     entries = Array(entries.suffix(normalMaxEntries))
@@ -350,7 +487,7 @@ class LogcatManager {
                 startLogcat()
             }
         } else {
-            // User scrolled away from bottom
+            // Need to preserve buffer
             // If buffer is already full, pause immediately
             if !isPaused && entries.count >= pausedMaxEntries {
                 isPaused = true
@@ -392,13 +529,13 @@ class LogcatManager {
             }
         }
         
-        // Trim if needed (only when at bottom). We don't trim while not at
-        // bottom because the visible text will jump around.
-        if isAtBottom && entries.count > normalMaxEntries {
+        // Trim if needed (only when not preserving buffer).
+        // We don't trim while preserving because the visible text will jump around.
+        if !shouldPreserveBuffer && entries.count > normalMaxEntries {
             let entriesToRemove = entries.count - normalMaxEntries
             entries.removeFirst(entriesToRemove)
-        } else if !isAtBottom && entries.count >= pausedMaxEntries {
-            // Buffer is full while not at bottom - pause listening
+        } else if shouldPreserveBuffer && entries.count >= pausedMaxEntries {
+            // Buffer is full while preserving - pause listening
             isPaused = true
             outputPipe?.fileHandleForReading.readabilityHandler = nil
         }
