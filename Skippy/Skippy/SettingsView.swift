@@ -14,15 +14,14 @@ struct SettingsView: View {
         Form {
             Section("Logcat") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Buffer Size: \(logcatBufferSize) lines")
-                        .font(.headline)
-                    
                     Slider(value: Binding(
                         get: { Double(logcatBufferSize) },
                         set: { logcatBufferSize = Int($0) }
-                    ), in: 1000...10000, step: 1000)
-                    
-                    Text("Number of lines to display")
+                    ), in: 1000...10000, step: 1000) {
+                        Text("Buffer Size")
+                    }
+
+                    Text("\(logcatBufferSize) lines")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
