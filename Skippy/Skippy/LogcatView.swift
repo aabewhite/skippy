@@ -67,16 +67,55 @@ struct LogcatView: View {
     }
 
     private func saveLog() {
-        // Snapshot the buffer immediately so new output doesn't affect it
-        let snapshot = logcatManager.entries.map(\.rawText).joined(separator: "\n")
+        let allEntries = logcatManager.entries
+        let hasFilter = minLevel != "V" || !filterText.trimmingCharacters(in: .whitespaces).isEmpty
+
+        // Snapshot both versions immediately so new output doesn't affect them
+        let allText = allEntries.map(\.rawText).joined(separator: "\n")
+        let filteredText = hasFilter ? filteredEntries(from: allEntries).map(\.rawText).joined(separator: "\n") : nil
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = "logcat.txt"
 
+        var popup: NSPopUpButton?
+        if hasFilter {
+            let button = NSPopUpButton(frame: .zero, pullsDown: false)
+            button.addItems(withTitles: ["All Entries", "Filtered Entries"])
+            let preferFiltered = UserDefaults.standard.bool(forKey: "saveLogFiltered")
+            button.selectItem(at: preferFiltered ? 1 : 0)
+            button.sizeToFit()
+            panel.accessoryView = button
+            popup = button
+        }
+
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            try? snapshot.write(to: url, atomically: true, encoding: .utf8)
+            let useFiltered: Bool
+            if let popup {
+                useFiltered = popup.indexOfSelectedItem == 1
+                UserDefaults.standard.set(useFiltered, forKey: "saveLogFiltered")
+            } else {
+                useFiltered = false
+            }
+            let text = useFiltered ? (filteredText ?? allText) : allText
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func filteredEntries(from entries: [LogcatEntry]) -> [LogcatEntry] {
+        let minLogLevel = LogcatEntry.Level(rawValue: minLevel)
+        let searchText = filterText.trimmingCharacters(in: .whitespaces)
+        return entries.filter { entry in
+            if let minLogLevel, let level = entry.level {
+                guard level >= minLogLevel else { return false }
+            } else if minLogLevel != nil {
+                return false
+            }
+            if !searchText.isEmpty {
+                guard entry.rawText.localizedCaseInsensitiveContains(searchText) else { return false }
+            }
+            return true
         }
     }
 }
