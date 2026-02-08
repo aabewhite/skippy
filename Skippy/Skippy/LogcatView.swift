@@ -18,8 +18,41 @@ struct LogcatView: View {
         max(6, min(30, Self.baseFontSize + CGFloat(fontSizeOffset)))
     }
     
+    @FocusState private var isSearchFieldFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
+            if isSearchVisible {
+                HStack(spacing: 8) {
+                    TextField("Search", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 300)
+                        .focused($isSearchFieldFocused)
+                        .onSubmit { advanceMatch(forward: true) }
+                    Text(totalMatchCount > 0 ? "\(currentMatchIndex + 1)/\(totalMatchCount)" : "0/0")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, alignment: .center)
+                    Button(action: { advanceMatch(forward: false) }) {
+                        Image(systemName: "chevron.up")
+                    }
+                    .disabled(totalMatchCount == 0)
+                    Button(action: { advanceMatch(forward: true) }) {
+                        Image(systemName: "chevron.down")
+                    }
+                    .disabled(totalMatchCount == 0)
+                    Button(action: dismissSearch) {
+                        Image(systemName: "xmark")
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.bar)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if let error = logcatManager.errorMessage {
                 Text(error)
                     .font(.system(.body, design: .monospaced))
@@ -57,7 +90,7 @@ struct LogcatView: View {
                 .pickerStyle(.menu)
                 .frame(width: 100)
             }
-            
+
             ToolbarItem(placement: .automatic) {
                 Button(action: saveLog) {
                     Label("Save", systemImage: "square.and.arrow.down")
@@ -73,33 +106,10 @@ struct LogcatView: View {
             }
 
             ToolbarItem(placement: .automatic) {
-                if isSearchVisible {
-                    HStack(spacing: 4) {
-                        TextField("Search", text: $searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 160)
-                            .onSubmit { advanceMatch(forward: true) }
-                        Text(totalMatchCount > 0 ? "\(currentMatchIndex + 1)/\(totalMatchCount)" : "0/0")
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .center)
-                        Button(action: { advanceMatch(forward: false) }) {
-                            Image(systemName: "chevron.up")
-                        }
-                        .disabled(totalMatchCount == 0)
-                        Button(action: { advanceMatch(forward: true) }) {
-                            Image(systemName: "chevron.down")
-                        }
-                        .disabled(totalMatchCount == 0)
-                        Button(action: dismissSearch) {
-                            Image(systemName: "xmark")
-                        }
-                    }
-                } else {
-                    Button(action: activateSearch) {
-                        Label("Search", systemImage: "magnifyingglass")
-                    }
+                Button(action: {
+                    if isSearchVisible { dismissSearch() } else { activateSearch() }
+                }) {
+                    Label("Search", systemImage: "magnifyingglass")
                 }
             }
         }
@@ -122,12 +132,17 @@ struct LogcatView: View {
     }
 
     private func activateSearch() {
-        isSearchVisible = true
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isSearchVisible = true
+        }
         logcatManager.isSearchActive = true
+        isSearchFieldFocused = true
     }
 
     private func dismissSearch() {
-        isSearchVisible = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isSearchVisible = false
+        }
         searchText = ""
         currentMatchIndex = 0
         totalMatchCount = 0
