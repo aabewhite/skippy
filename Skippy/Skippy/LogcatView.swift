@@ -127,7 +127,7 @@ class LogcatManager {
     private var isPaused = false
 
     private let normalMaxLines = 4000
-    private let pausedMaxLines = 4005
+    private let pausedMaxLines = 50_000
 
     func startLogcat() {
         // Find adb executable path
