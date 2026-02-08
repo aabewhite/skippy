@@ -73,6 +73,7 @@ struct LogcatView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
+        .background(WindowFrameSaver(name: "logcatWindow"))
         .navigationTitle("Logcat")
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -234,6 +235,22 @@ extension FocusedValues {
         get { self[SearchCommandsKey.self] }
         set { self[SearchCommandsKey.self] = newValue }
     }
+}
+
+/// Sets `NSWindow.setFrameAutosaveName` on the hosting window so AppKit
+/// automatically persists and restores the window's size and position.
+private struct WindowFrameSaver: NSViewRepresentable {
+    let name: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.setFrameAutosaveName(name)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 private struct LogcatScrollView: NSViewRepresentable {

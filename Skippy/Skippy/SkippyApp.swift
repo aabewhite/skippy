@@ -13,6 +13,11 @@ struct SkippyApp: App {
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @FocusedValue(\.searchCommands) private var searchCommands
 
+    init() {
+        // Prevent macOS from restoring secondary windows (e.g. Logcat) on relaunch
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
