@@ -23,13 +23,11 @@ struct SkippyApp: App {
             ContentView()
         }
         .commands {
-            CommandGroup(before: .windowList) {
+            CommandMenu("Debug") {
                 Button("Logcat") {
                     openWindow(id: "logcat")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
-
-                Divider()
             }
 
             CommandGroup(after: .pasteboard) {
