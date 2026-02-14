@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 /// Displays the tail of `adb logcat`.
 struct LogcatView: View {
     @State private var logcatManager = LogcatManager()
-    @AppStorage("logcatMinLevel") private var minLevel: String = "V"
+    @State private var minLevel: String = "V"
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @State private var filterText: String = ""
     @State private var isSearchVisible = false
