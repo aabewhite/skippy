@@ -63,19 +63,43 @@ struct NewEmulatorView: View {
             }
         }
         .onChange(of: selectedProfile) {
-            if isAutoUpdatingName { name = generateAutoName() }
+            if isAutoUpdatingName || name.isEmpty {
+                isAutoUpdatingName = true
+                name = generateAutoName()
+            }
         }
         .onChange(of: selectedAPILevel) {
-            if isAutoUpdatingName { name = generateAutoName() }
+            if isAutoUpdatingName || name.isEmpty {
+                isAutoUpdatingName = true
+                name = generateAutoName()
+            }
         }
         .onAppear {
             if manager.deviceProfiles.isEmpty { manager.loadDeviceProfiles() }
             if manager.apiLevels.isEmpty { manager.loadAPILevels() }
         }
+        .onChange(of: manager.deviceProfiles) {
+            if selectedProfile == nil {
+                selectedProfile = manager.deviceProfiles.first(where: { $0.id == "pixel_7" })
+            }
+        }
+        .onChange(of: manager.apiLevels) {
+            if selectedAPILevel == nil {
+                selectedAPILevel = manager.apiLevels.first(where: { $0.level == 34 })
+            }
+        }
     }
 
     private func generateAutoName() -> String {
         guard let profile = selectedProfile, let level = selectedAPILevel else { return "" }
-        return "\(profile.id)_\(level.level)"
+        let baseName = "\(profile.id)_\(level.level)"
+        if !manager.emulators.contains(baseName) {
+            return baseName
+        }
+        var counter = 2
+        while manager.emulators.contains("\(baseName)_\(counter)") {
+            counter += 1
+        }
+        return "\(baseName)_\(counter)"
     }
 }

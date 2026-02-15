@@ -113,7 +113,6 @@ class EmulatorManager {
         }
 
         isCreating = true
-        createOutput = ""
 
         let arguments = [
             "android", "emulator", "create",
@@ -121,6 +120,9 @@ class EmulatorManager {
             "--device-profile", deviceProfile.id,
             "--android-api-level", String(apiLevel.level)
         ]
+
+        let commandLine = ([skipPath] + arguments).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+        createOutput = "$ \(commandLine)\n"
 
         Task {
             await runProcessStreaming(skipPath, arguments: arguments)
