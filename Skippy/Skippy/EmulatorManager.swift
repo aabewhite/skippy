@@ -30,8 +30,6 @@ class EmulatorManager {
     var profilesError: String?
     var levelsError: String?
 
-    @ObservationIgnored
-    @AppStorage("lastUsedEmulator") private var lastUsedEmulator: String = ""
 
     // MARK: - Emulator List
 
@@ -160,11 +158,16 @@ class EmulatorManager {
 
     // MARK: - Launch Emulator
 
-    func launchEmulator(_ name: String) {
+    func launchEmulator(_ name: String? = nil) {
         guard let skipPath = CommandFinder.findSkip() else { return }
 
-        lastUsedEmulator = name
-        let arguments = ["android", "emulator", "launch", "--name", name]
+        var arguments = ["android", "emulator", "launch"]
+        if let name {
+            arguments += ["--name", name]
+        }
+        if let androidHome = CommandFinder.findAndroidHome() {
+            arguments += ["--android-home", androidHome]
+        }
         appendCommand(skipPath, arguments: arguments)
 
         Task {
@@ -176,14 +179,6 @@ class EmulatorManager {
             process.standardError = Pipe()
             try? process.run()
         }
-    }
-
-    func launchLastUsedEmulator() -> Bool {
-        guard !lastUsedEmulator.isEmpty, emulators.contains(lastUsedEmulator) else {
-            return false
-        }
-        launchEmulator(lastUsedEmulator)
-        return true
     }
 
     // MARK: - Command Output Logging

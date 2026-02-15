@@ -81,6 +81,11 @@ enum CommandFinder {
         return nil
     }
 
+    /// Returns the first candidate Android SDK root that exists on disk.
+    static func findAndroidHome() -> String? {
+        androidSDKRoots.first { FileManager.default.fileExists(atPath: $0) }
+    }
+
     static func findAdb() -> String? { find("adb") }
     static func findSkip() -> String? { find("skip") }
     static func findAvdmanager() -> String? { find("avdmanager") }

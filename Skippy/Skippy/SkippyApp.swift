@@ -13,7 +13,6 @@ struct SkippyApp: App {
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @FocusedValue(\.searchCommands) private var searchCommands
     @State private var emulatorManager = EmulatorManager()
-    @State private var showNoEmulatorAlert = false
 
     init() {
         // Prevent macOS from restoring secondary windows (e.g. Logcat) on relaunch
@@ -23,14 +22,6 @@ struct SkippyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .alert("No Emulators", isPresented: $showNoEmulatorAlert) {
-                    Button("Manage Emulators...") {
-                        openWindow(id: "emulators")
-                    }
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text("No emulators are available. Create one in the Emulators window.")
-                }
         }
         .commands {
             CommandMenu("Debug") {
@@ -47,10 +38,9 @@ struct SkippyApp: App {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
 
                 Button("Launch") {
-                    if !emulatorManager.launchLastUsedEmulator() {
-                        showNoEmulatorAlert = true
-                    }
+                    emulatorManager.launchEmulator()
                 }
+                .keyboardShortcut("e", modifiers: [.command, .control])
             }
 
             CommandGroup(after: .pasteboard) {
