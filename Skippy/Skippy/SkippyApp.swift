@@ -12,6 +12,8 @@ struct SkippyApp: App {
     @Environment(\.openWindow) private var openWindow
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @FocusedValue(\.searchCommands) private var searchCommands
+    @State private var emulatorManager = EmulatorManager()
+    @State private var showNoEmulatorAlert = false
 
     init() {
         // Prevent macOS from restoring secondary windows (e.g. Logcat) on relaunch
@@ -21,6 +23,14 @@ struct SkippyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .alert("No Emulators", isPresented: $showNoEmulatorAlert) {
+                    Button("Manage Emulators...") {
+                        openWindow(id: "emulators")
+                    }
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("No emulators are available. Create one in the Emulators window.")
+                }
         }
         .commands {
             CommandMenu("Debug") {
@@ -28,6 +38,19 @@ struct SkippyApp: App {
                     openWindow(id: "logcat")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("Emulator") {
+                Button("Manage Emulators...") {
+                    openWindow(id: "emulators")
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Button("Launch") {
+                    if !emulatorManager.launchLastUsedEmulator() {
+                        showNoEmulatorAlert = true
+                    }
+                }
             }
 
             CommandGroup(after: .pasteboard) {
@@ -76,7 +99,19 @@ struct SkippyApp: App {
             LogcatView()
         }
         .defaultSize(width: 800, height: 600)
-        
+
+        WindowGroup("Emulators", id: "emulators") {
+            EmulatorView()
+                .environment(emulatorManager)
+        }
+        .defaultSize(width: 400, height: 300)
+
+        WindowGroup("New Emulator", id: "newEmulator") {
+            NewEmulatorView()
+                .environment(emulatorManager)
+        }
+        .defaultSize(width: 550, height: 500)
+
         Settings {
             SettingsView()
         }

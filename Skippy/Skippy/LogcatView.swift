@@ -239,7 +239,7 @@ extension FocusedValues {
 
 /// Sets `NSWindow.setFrameAutosaveName` on the hosting window so AppKit
 /// automatically persists and restores the window's size and position.
-private struct WindowFrameSaver: NSViewRepresentable {
+struct WindowFrameSaver: NSViewRepresentable {
     let name: String
 
     func makeNSView(context: Context) -> NSView {
@@ -478,7 +478,7 @@ class LogcatManager {
 
     func startLogcat() {
         // Find adb executable path
-        guard let adbPath = findAdb() else {
+        guard let adbPath = CommandFinder.findAdb() else {
             self.errorMessage = "Error: Could not find adb executable."
             return
         }
@@ -597,72 +597,6 @@ class LogcatManager {
         }
     }
 
-    private func findAdb() -> String? {
-        // First, try using the user's login shell to find adb
-        // This will pick up PATH settings from .zshrc, .bash_profile, etc.
-        if let shellPath = findAdbViaShell() {
-            return shellPath
-        }
-        
-        // Check common installation paths
-        let commonPaths = [
-            "/opt/homebrew/bin/adb",  // Apple Silicon Homebrew
-            "/usr/local/bin/adb",      // Intel Homebrew
-            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
-            "\(NSHomeDirectory())/Android/sdk/platform-tools/adb",
-            "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/adb"
-        ]
-
-        for path in commonPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        
-        // Last resort: check if app's environment has ANDROID_HOME set
-        // (This will only work if the app was launched from a terminal with the variable set)
-        if let androidHome = ProcessInfo.processInfo.environment["ANDROID_HOME"] ??
-                             ProcessInfo.processInfo.environment["ANDROID_SDK_ROOT"] {
-            let adbPath = "\(androidHome)/platform-tools/adb"
-            if FileManager.default.isExecutableFile(atPath: adbPath) {
-                return adbPath
-            }
-        }
-
-        return nil
-    }
-
-    private func findAdbViaShell() -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        
-        // Use the user's login shell to get their full environment
-        // Try zsh first (default on modern macOS), then bash
-        let shell = FileManager.default.fileExists(atPath: "\(NSHomeDirectory())/.zshrc") 
-            ? "/bin/zsh" 
-            : "/bin/bash"
-        
-        process.executableURL = URL(fileURLWithPath: shell)
-        // -l = login shell (loads profile), -c = execute command
-        process.arguments = ["-l", "-c", "which adb 2>/dev/null"]
-        process.standardOutput = pipe
-        process.standardError = Pipe() // Suppress errors
-
-        try? process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else { return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Verify the path actually exists and is executable
-        if let path = path, !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        
-        return nil
-    }
 }
 
 /// Represents a single logcat entry.
