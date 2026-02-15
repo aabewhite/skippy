@@ -43,13 +43,10 @@ class EmulatorManager {
 
         isLoadingList = true
         listError = nil
-        let arguments = ["android", "emulator", "list"]
-        appendCommand(skipPath, arguments: arguments)
 
         Task {
             do {
-                let output = try await runProcess(skipPath, arguments: arguments)
-                appendOutput(output)
+                let output = try await runProcess(skipPath, arguments: ["android", "emulator", "list"])
                 let names = output.split(separator: "\n")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
@@ -58,7 +55,6 @@ class EmulatorManager {
                     selectedEmulator = nil
                 }
             } catch {
-                appendOutput(error.localizedDescription + "\n")
                 listError = "Failed to list emulators: \(error.localizedDescription)"
             }
             isLoadingList = false
@@ -197,8 +193,7 @@ class EmulatorManager {
     }
 
     private func appendCommand(_ path: String, arguments: [String]) {
-        if !commandOutput.isEmpty { commandOutput += "\n" }
-        commandOutput += "$ \(formatCommandLine(path, arguments: arguments))\n"
+        commandOutput = "$ \(formatCommandLine(path, arguments: arguments))\n"
     }
 
     private func appendOutput(_ text: String) {
