@@ -160,6 +160,7 @@ class EmulatorManager {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: skipPath)
             process.arguments = ["android", "emulator", "launch", "--name", name]
+            process.environment = Self.processEnvironment
             process.standardOutput = Pipe()
             process.standardError = Pipe()
             try? process.run()
@@ -176,6 +177,12 @@ class EmulatorManager {
 
     // MARK: - Private Helpers
 
+    private static let processEnvironment: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = CommandFinder.toolPATH
+        return env
+    }()
+
     private func runProcess(_ path: String, arguments: [String]) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
@@ -183,6 +190,7 @@ class EmulatorManager {
 
             process.executableURL = URL(fileURLWithPath: path)
             process.arguments = arguments
+            process.environment = Self.processEnvironment
             process.standardOutput = pipe
             process.standardError = pipe
 
@@ -217,6 +225,7 @@ class EmulatorManager {
 
             process.executableURL = URL(fileURLWithPath: path)
             process.arguments = arguments
+            process.environment = Self.processEnvironment
             process.standardOutput = pipe
             process.standardError = pipe
 
