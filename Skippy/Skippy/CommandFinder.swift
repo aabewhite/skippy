@@ -3,6 +3,42 @@ import Foundation
 /// Shared utility for locating command-line tools on the system.
 enum CommandFinder {
 
+    /// Common directories where CLI tools may be installed.
+    private static let generalBinDirectories = [
+        "~/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    ]
+
+    /// Candidate Android SDK root directories derived from environment
+    /// variables and common install locations.
+    private static let androidSDKRoots: [String] = {
+        var roots: [String] = []
+        if let home = ProcessInfo.processInfo.environment["ANDROID_HOME"] {
+            roots.append(home)
+        }
+        if let root = ProcessInfo.processInfo.environment["ANDROID_SDK_ROOT"],
+           root != ProcessInfo.processInfo.environment["ANDROID_HOME"] {
+            roots.append(root)
+        }
+        roots.append("\(NSHomeDirectory())/Library/Android/sdk")
+        roots.append("\(NSHomeDirectory())/Android/sdk")
+        return roots
+    }()
+
+    /// All candidate directories where tools might be found, combining
+    /// general bin directories and Android SDK subdirectories.
+    static let candidateDirectories: [String] = {
+        var dirs = generalBinDirectories
+        for root in androidSDKRoots {
+            dirs.append("\(root)/platform-tools")
+            dirs.append("\(root)/cmdline-tools/latest/bin")
+        }
+        dirs.append("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin")
+        return dirs
+    }()
+
     /// Uses the user's login shell to locate a command via `which`.
     static func findViaShell(_ command: String) -> String? {
         let process = Process()
@@ -31,128 +67,36 @@ enum CommandFinder {
         return nil
     }
 
-    /// Locates the `adb` executable by searching the shell, common paths, and environment variables.
-    static func findAdb() -> String? {
-        if let shellPath = findViaShell("adb") {
+    /// Searches for a command by name via shell lookup, then candidate directories.
+    static func find(_ command: String) -> String? {
+        if let shellPath = findViaShell(command) {
             return shellPath
         }
-
-        let commonPaths = [
-            "/opt/homebrew/bin/adb",
-            "/usr/local/bin/adb",
-            "\(NSHomeDirectory())/Library/Android/sdk/platform-tools/adb",
-            "\(NSHomeDirectory())/Android/sdk/platform-tools/adb",
-            "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/adb"
-        ]
-
-        for path in commonPaths {
+        for dir in candidateDirectories {
+            let path = "\(dir)/\(command)"
             if FileManager.default.isExecutableFile(atPath: path) {
                 return path
             }
         }
-
-        if let androidHome = ProcessInfo.processInfo.environment["ANDROID_HOME"] ??
-                             ProcessInfo.processInfo.environment["ANDROID_SDK_ROOT"] {
-            let adbPath = "\(androidHome)/platform-tools/adb"
-            if FileManager.default.isExecutableFile(atPath: adbPath) {
-                return adbPath
-            }
-        }
-
         return nil
     }
 
-    /// Locates the `skip` CLI tool.
-    static func findSkip() -> String? {
-        if let shellPath = findViaShell("skip") {
-            return shellPath
-        }
+    static func findAdb() -> String? { find("adb") }
+    static func findSkip() -> String? { find("skip") }
+    static func findAvdmanager() -> String? { find("avdmanager") }
+    static func findSdkmanager() -> String? { find("sdkmanager") }
 
-        let commonPaths = [
-            "/opt/homebrew/bin/skip",
-            "/usr/local/bin/skip"
-        ]
-
-        for path in commonPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        return nil
-    }
-
-    /// Locates the `sdkmanager` tool from the Android SDK command-line tools.
-    static func findSdkmanager() -> String? {
-        if let shellPath = findViaShell("sdkmanager") {
-            return shellPath
-        }
-
-        if let androidHome = ProcessInfo.processInfo.environment["ANDROID_HOME"] ??
-                             ProcessInfo.processInfo.environment["ANDROID_SDK_ROOT"] {
-            let latestPath = "\(androidHome)/cmdline-tools/latest/bin/sdkmanager"
-            if FileManager.default.isExecutableFile(atPath: latestPath) {
-                return latestPath
-            }
-        }
-
-        let commonPaths = [
-            "\(NSHomeDirectory())/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager",
-            "\(NSHomeDirectory())/Android/sdk/cmdline-tools/latest/bin/sdkmanager"
-        ]
-
-        for path in commonPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        return nil
-    }
-
-    /// Builds a PATH string from the directories of all located tools
-    /// (skip, avdmanager, sdkmanager, adb) so that spawned processes can
-    /// find sibling commands.
+    /// PATH string for spawned processes, combining candidate directories
+    /// with directories from shell-found tools and standard system paths.
     static let toolPATH: String = {
-        var dirs = Set<String>()
-        for path in [findSkip(), findAvdmanager(), findSdkmanager(), findAdb()] {
-            if let path {
-                let dir = (path as NSString).deletingLastPathComponent
-                dirs.insert(dir)
+        var dirs: [String] = []
+        // Include directories from shell-found tools (may be in non-standard locations)
+        for command in ["skip", "adb", "avdmanager", "sdkmanager"] {
+            if let path = findViaShell(command) {
+                dirs.append((path as NSString).deletingLastPathComponent)
             }
         }
-        // Append standard system paths as fallback
-        let systemPaths = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        for p in systemPaths { dirs.insert(p) }
+        dirs += candidateDirectories
         return dirs.joined(separator: ":")
     }()
-
-    /// Locates the `avdmanager` tool from the Android SDK command-line tools.
-    static func findAvdmanager() -> String? {
-        if let shellPath = findViaShell("avdmanager") {
-            return shellPath
-        }
-
-        // Check ANDROID_HOME / ANDROID_SDK_ROOT for cmdline-tools
-        if let androidHome = ProcessInfo.processInfo.environment["ANDROID_HOME"] ??
-                             ProcessInfo.processInfo.environment["ANDROID_SDK_ROOT"] {
-            let latestPath = "\(androidHome)/cmdline-tools/latest/bin/avdmanager"
-            if FileManager.default.isExecutableFile(atPath: latestPath) {
-                return latestPath
-            }
-        }
-
-        let commonPaths = [
-            "\(NSHomeDirectory())/Library/Android/sdk/cmdline-tools/latest/bin/avdmanager",
-            "\(NSHomeDirectory())/Android/sdk/cmdline-tools/latest/bin/avdmanager"
-        ]
-
-        for path in commonPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        return nil
-    }
 }
