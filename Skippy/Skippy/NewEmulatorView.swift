@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewEmulatorView: View {
     @Environment(EmulatorManager.self) private var manager
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedProfile: DeviceProfile?
     @State private var selectedAPILevel: APILevel?
     @State private var name: String = ""
@@ -86,6 +87,12 @@ struct NewEmulatorView: View {
         .onChange(of: manager.apiLevels) {
             if selectedAPILevel == nil {
                 selectedAPILevel = manager.apiLevels.first(where: { $0.level == 34 })
+            }
+        }
+        .onChange(of: manager.createSucceeded) {
+            if manager.createSucceeded {
+                manager.createSucceeded = false
+                dismiss()
             }
         }
     }

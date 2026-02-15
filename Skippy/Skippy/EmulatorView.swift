@@ -8,27 +8,42 @@ struct EmulatorView: View {
     var body: some View {
         @Bindable var manager = manager
 
-        Group {
-            if let error = manager.listError {
-                ContentUnavailableView {
-                    Label("Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                }
-            } else if manager.emulators.isEmpty && !manager.isLoadingList {
-                ContentUnavailableView {
-                    Label("No Emulators", systemImage: "iphone.slash")
-                } description: {
-                    Text("Create an emulator to get started.")
-                } actions: {
-                    Button("Create Emulator") {
-                        openWindow(id: "newEmulator")
+        VStack(spacing: 0) {
+            Group {
+                if let error = manager.listError {
+                    ContentUnavailableView {
+                        Label("Error", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    }
+                } else if manager.emulators.isEmpty && !manager.isLoadingList {
+                    ContentUnavailableView {
+                        Label("No Emulators", systemImage: "iphone.slash")
+                    } description: {
+                        Text("Create an emulator to get started.")
+                    } actions: {
+                        Button("Create Emulator") {
+                            openWindow(id: "newEmulator")
+                        }
+                    }
+                } else {
+                    List(manager.emulators, id: \.self, selection: $manager.selectedEmulator) { name in
+                        Text(name)
                     }
                 }
-            } else {
-                List(manager.emulators, id: \.self, selection: $manager.selectedEmulator) { name in
-                    Text(name)
+            }
+
+            if !manager.commandOutput.isEmpty {
+                Divider()
+                ScrollView {
+                    Text(manager.commandOutput)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .textSelection(.enabled)
                 }
+                .frame(maxHeight: 200)
+                .background(Color(nsColor: .textBackgroundColor))
             }
         }
         .frame(minWidth: 500, minHeight: 200)

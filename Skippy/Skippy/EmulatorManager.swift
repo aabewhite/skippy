@@ -21,9 +21,11 @@ class EmulatorManager {
     var apiLevels: [APILevel] = []
     var isCreating: Bool = false
     var createOutput: String = ""
+    var createSucceeded: Bool = false
     var isLoadingList: Bool = false
     var isLoadingProfiles: Bool = false
     var isLoadingLevels: Bool = false
+    var commandOutput: String = ""
     var listError: String?
     var profilesError: String?
     var levelsError: String?
@@ -41,19 +43,22 @@ class EmulatorManager {
 
         isLoadingList = true
         listError = nil
+        let arguments = ["android", "emulator", "list"]
+        appendCommand(skipPath, arguments: arguments)
 
         Task {
             do {
-                let output = try await runProcess(skipPath, arguments: ["android", "emulator", "list"])
+                let output = try await runProcess(skipPath, arguments: arguments)
+                appendOutput(output)
                 let names = output.split(separator: "\n")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
                 emulators = names
-                // Clear selection if the selected emulator was deleted
                 if let selected = selectedEmulator, !names.contains(selected) {
                     selectedEmulator = nil
                 }
             } catch {
+                appendOutput(error.localizedDescription + "\n")
                 listError = "Failed to list emulators: \(error.localizedDescription)"
             }
             isLoadingList = false
@@ -113,6 +118,7 @@ class EmulatorManager {
         }
 
         isCreating = true
+        createSucceeded = false
 
         let arguments = [
             "android", "emulator", "create",
@@ -121,13 +127,15 @@ class EmulatorManager {
             "--android-api-level", String(apiLevel.level)
         ]
 
-        let commandLine = ([skipPath] + arguments).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
-        createOutput = "$ \(commandLine)\n"
+        createOutput = "$ \(formatCommandLine(skipPath, arguments: arguments))\n"
 
         Task {
-            await runProcessStreaming(skipPath, arguments: arguments)
+            let success = await runProcessStreaming(skipPath, arguments: arguments)
             isCreating = false
             refreshEmulatorList()
+            if success {
+                createSucceeded = true
+            }
         }
     }
 
@@ -139,11 +147,16 @@ class EmulatorManager {
             return
         }
 
+        let arguments = ["delete", "avd", "-n", name]
+        appendCommand(avdmanagerPath, arguments: arguments)
+
         Task {
             do {
-                _ = try await runProcess(avdmanagerPath, arguments: ["delete", "avd", "-n", name])
+                let output = try await runProcess(avdmanagerPath, arguments: arguments)
+                appendOutput(output)
                 refreshEmulatorList()
             } catch {
+                appendOutput(error.localizedDescription + "\n")
                 listError = "Failed to delete emulator: \(error.localizedDescription)"
             }
         }
@@ -155,11 +168,13 @@ class EmulatorManager {
         guard let skipPath = CommandFinder.findSkip() else { return }
 
         lastUsedEmulator = name
+        let arguments = ["android", "emulator", "launch", "--name", name]
+        appendCommand(skipPath, arguments: arguments)
 
         Task {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: skipPath)
-            process.arguments = ["android", "emulator", "launch", "--name", name]
+            process.arguments = arguments
             process.environment = Self.processEnvironment
             process.standardOutput = Pipe()
             process.standardError = Pipe()
@@ -173,6 +188,22 @@ class EmulatorManager {
         }
         launchEmulator(lastUsedEmulator)
         return true
+    }
+
+    // MARK: - Command Output Logging
+
+    private func formatCommandLine(_ path: String, arguments: [String]) -> String {
+        ([path] + arguments).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+    }
+
+    private func appendCommand(_ path: String, arguments: [String]) {
+        if !commandOutput.isEmpty { commandOutput += "\n" }
+        commandOutput += "$ \(formatCommandLine(path, arguments: arguments))\n"
+    }
+
+    private func appendOutput(_ text: String) {
+        commandOutput += text
+        if !text.hasSuffix("\n") { commandOutput += "\n" }
     }
 
     // MARK: - Private Helpers
@@ -218,7 +249,7 @@ class EmulatorManager {
         }
     }
 
-    private func runProcessStreaming(_ path: String, arguments: [String]) async {
+    private func runProcessStreaming(_ path: String, arguments: [String]) async -> Bool {
         await withCheckedContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
@@ -237,9 +268,9 @@ class EmulatorManager {
                 }
             }
 
-            process.terminationHandler = { _ in
+            process.terminationHandler = { process in
                 pipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume()
+                continuation.resume(returning: process.terminationStatus == 0)
             }
 
             do {
@@ -248,7 +279,7 @@ class EmulatorManager {
                 Task { @MainActor [weak self] in
                     self?.createOutput += "Error: \(error.localizedDescription)\n"
                 }
-                continuation.resume()
+                continuation.resume(returning: false)
             }
         }
     }
