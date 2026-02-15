@@ -158,7 +158,7 @@ class EmulatorManager {
 
     // MARK: - Launch Emulator
 
-    func launchEmulator(_ name: String? = nil) {
+    func launchEmulator(_ name: String? = nil, showOutput: Bool = true) {
         guard let skipPath = CommandFinder.findSkip() else { return }
 
         var arguments = ["android", "emulator", "launch"]
@@ -168,7 +168,9 @@ class EmulatorManager {
         if let androidHome = CommandFinder.findAndroidHome() {
             arguments += ["--android-home", androidHome]
         }
-        appendCommand(skipPath, arguments: arguments)
+        if showOutput {
+            appendCommand(skipPath, arguments: arguments)
+        }
 
         Task {
             let process = Process()

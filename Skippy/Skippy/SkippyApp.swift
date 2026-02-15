@@ -38,7 +38,7 @@ struct SkippyApp: App {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
 
                 Button("Launch") {
-                    emulatorManager.launchEmulator()
+                    emulatorManager.launchEmulator(showOutput: false)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .control])
             }
