@@ -165,9 +165,6 @@ class EmulatorManager {
         if let name {
             arguments += ["--name", name]
         }
-        if let androidHome = CommandFinder.findAndroidHome() {
-            arguments += ["--android-home", androidHome]
-        }
         if showOutput {
             appendCommand(skipPath, arguments: arguments)
         }

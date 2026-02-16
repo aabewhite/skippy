@@ -2,10 +2,11 @@ import Foundation
 
 /// Shared utility for locating command-line tools on the system.
 enum CommandFinder {
+    /// User's personal bin directory
+    private static let personalBinDirectory = ("~/bin" as NSString).expandingTildeInPath
 
     /// Common directories where CLI tools may be installed.
     private static let generalBinDirectories = [
-        "~/bin",
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin", "/bin", "/usr/sbin", "/sbin",
@@ -30,12 +31,13 @@ enum CommandFinder {
     /// All candidate directories where tools might be found, combining
     /// general bin directories and Android SDK subdirectories.
     static let candidateDirectories: [String] = {
-        var dirs = generalBinDirectories
+        var dirs = [personalBinDirectory]
         for root in androidSDKRoots {
             dirs.append("\(root)/platform-tools")
             dirs.append("\(root)/cmdline-tools/latest/bin")
         }
         dirs.append("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin")
+        dirs += generalBinDirectories
         return dirs
     }()
 
@@ -79,11 +81,6 @@ enum CommandFinder {
             }
         }
         return nil
-    }
-
-    /// Returns the first candidate Android SDK root that exists on disk.
-    static func findAndroidHome() -> String? {
-        androidSDKRoots.first { FileManager.default.fileExists(atPath: $0) }
     }
 
     static func findAdb() -> String? { find("adb") }
