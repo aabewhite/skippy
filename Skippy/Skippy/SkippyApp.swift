@@ -13,6 +13,7 @@ struct SkippyApp: App {
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @FocusedValue(\.searchCommands) private var searchCommands
     @State private var emulatorManager = EmulatorManager()
+    @State private var createEmulatorManager = CreateEmulatorManager()
 
     init() {
         // Prevent macOS from restoring secondary windows (e.g. Logcat) on relaunch
@@ -38,7 +39,7 @@ struct SkippyApp: App {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
 
                 Button("Launch") {
-                    emulatorManager.launchEmulator(showOutput: false)
+                    emulatorManager.launchEmulator()
                 }
                 .keyboardShortcut("e", modifiers: [.command, .control])
             }
@@ -99,6 +100,7 @@ struct SkippyApp: App {
         WindowGroup("New Emulator", id: "newEmulator") {
             NewEmulatorView()
                 .environment(emulatorManager)
+                .environment(createEmulatorManager)
         }
         .defaultSize(width: 550, height: 500)
 

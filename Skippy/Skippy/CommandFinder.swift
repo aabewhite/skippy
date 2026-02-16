@@ -124,3 +124,44 @@ enum CommandFinder {
     static func findAvdmanager() -> FoundCommand? { find("avdmanager") }
     static func findSdkmanager() -> FoundCommand? { find("sdkmanager") }
 }
+
+extension FoundCommand {
+    func run(arguments: [String]) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            process.environment = environment
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+                return
+            }
+
+            Task.detached {
+                process.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: "FoundCommand",
+                        code: Int(process.terminationStatus),
+                        userInfo: [NSLocalizedDescriptionKey: output.isEmpty ? "Process exited with code \(process.terminationStatus)" : output]
+                    ))
+                }
+            }
+        }
+    }
+
+    func formatCommandLine(arguments: [String]) -> String {
+        ([path] + arguments).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+    }
+}

@@ -85,3 +85,32 @@ struct CommandOutputView: NSViewRepresentable {
         }
     }
 }
+
+/// Wraps ``CommandOutputView`` with an animated "Executing..." last line while a command is running.
+struct AnimatedCommandOutputView: View {
+    let text: String
+    let fontSize: CGFloat
+    var isExecuting: Bool = false
+
+    @State private var dotCount = 0
+
+    private var displayText: String {
+        if isExecuting {
+            text + "Executing" + String(repeating: ".", count: dotCount)
+        } else {
+            text
+        }
+    }
+
+    var body: some View {
+        CommandOutputView(text: displayText, fontSize: fontSize)
+            .task(id: isExecuting) {
+                guard isExecuting else { return }
+                dotCount = 0
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    dotCount = (dotCount + 1) % 4
+                }
+            }
+    }
+}

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewEmulatorView: View {
     @Environment(EmulatorManager.self) private var manager
+    @Environment(CreateEmulatorManager.self) private var createManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @State private var selectedProfile: DeviceProfile?
@@ -19,19 +20,19 @@ struct NewEmulatorView: View {
             Form {
                 Picker("Device Profile", selection: $selectedProfile) {
                     Text("Select...").tag(nil as DeviceProfile?)
-                    ForEach(manager.deviceProfiles) { profile in
+                    ForEach(createManager.deviceProfiles) { profile in
                         Text(profile.name).tag(profile as DeviceProfile?)
                     }
                 }
-                .disabled(manager.isLoadingProfiles)
+                .disabled(createManager.isLoadingProfiles)
 
                 Picker("API Level", selection: $selectedAPILevel) {
                     Text("Select...").tag(nil as APILevel?)
-                    ForEach(manager.apiLevels) { level in
+                    ForEach(createManager.apiLevels) { level in
                         Text("\(level.name) (API \(level.level))").tag(level as APILevel?)
                     }
                 }
-                .disabled(manager.isLoadingLevels)
+                .disabled(createManager.isLoadingLevels)
 
                 TextField("Name", text: $name)
                     .onChange(of: name) {
@@ -44,9 +45,9 @@ struct NewEmulatorView: View {
             }
             .formStyle(.grouped)
 
-            if !manager.createOutput.isEmpty {
+            if !createManager.createOutput.isEmpty || createManager.isCreating {
                 Divider()
-                CommandOutputView(text: manager.createOutput, fontSize: fontSize)
+                AnimatedCommandOutputView(text: createManager.createOutput, fontSize: fontSize, isExecuting: createManager.isCreating)
                     .frame(maxHeight: .infinity)
             }
         }
@@ -55,13 +56,13 @@ struct NewEmulatorView: View {
         .navigationTitle("New Emulator")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                if manager.isCreating {
+                if createManager.isCreating {
                     ProgressView()
                         .controlSize(.small)
                 } else {
                     Button("Create") {
                         guard let profile = selectedProfile, let apiLevel = selectedAPILevel else { return }
-                        manager.createEmulator(name: name, deviceProfile: profile, apiLevel: apiLevel)
+                        createManager.createEmulator(name: name, deviceProfile: profile, apiLevel: apiLevel)
                     }
                     .disabled(selectedProfile == nil || selectedAPILevel == nil || name.isEmpty)
                 }
@@ -80,22 +81,23 @@ struct NewEmulatorView: View {
             }
         }
         .onAppear {
-            if manager.deviceProfiles.isEmpty { manager.loadDeviceProfiles() }
-            if manager.apiLevels.isEmpty { manager.loadAPILevels() }
+            if createManager.deviceProfiles.isEmpty { createManager.loadDeviceProfiles() }
+            if createManager.apiLevels.isEmpty { createManager.loadAPILevels() }
         }
-        .onChange(of: manager.deviceProfiles) {
+        .onChange(of: createManager.deviceProfiles) {
             if selectedProfile == nil {
-                selectedProfile = manager.deviceProfiles.first(where: { $0.id == "pixel_7" })
+                selectedProfile = createManager.deviceProfiles.first(where: { $0.id == "pixel_7" })
             }
         }
-        .onChange(of: manager.apiLevels) {
+        .onChange(of: createManager.apiLevels) {
             if selectedAPILevel == nil {
-                selectedAPILevel = manager.apiLevels.first(where: { $0.level == 34 })
+                selectedAPILevel = createManager.apiLevels.first(where: { $0.level == 34 })
             }
         }
-        .onChange(of: manager.createSucceeded) {
-            if manager.createSucceeded {
-                manager.createSucceeded = false
+        .onChange(of: createManager.createSucceeded) {
+            if createManager.createSucceeded {
+                createManager.createSucceeded = false
+                manager.refreshEmulatorList()
                 dismiss()
             }
         }

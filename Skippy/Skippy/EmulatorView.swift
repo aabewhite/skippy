@@ -39,9 +39,9 @@ struct EmulatorView: View {
                 }
             }
 
-            if !manager.commandOutput.isEmpty {
+            if !manager.commandOutput.isEmpty || manager.isCommandRunning {
                 Divider()
-                CommandOutputView(text: manager.commandOutput, fontSize: fontSize)
+                AnimatedCommandOutputView(text: manager.commandOutput, fontSize: fontSize, isExecuting: manager.isCommandRunning)
                     .frame(maxHeight: 200)
             }
         }
