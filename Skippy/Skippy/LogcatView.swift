@@ -478,7 +478,7 @@ class LogcatManager {
 
     func startLogcat() {
         // Find adb executable path
-        guard let adbPath = CommandFinder.findAdb() else {
+        guard let adb = CommandFinder.findAdb() else {
             self.errorMessage = "Error: Could not find adb executable."
             return
         }
@@ -486,9 +486,10 @@ class LogcatManager {
 
         let process = Process()
         let pipe = Pipe()
-        
-        process.executableURL = URL(fileURLWithPath: adbPath)
+
+        process.executableURL = URL(fileURLWithPath: adb.path)
         process.arguments = ["logcat"]
+        process.environment = adb.environment
         process.standardOutput = pipe
         process.standardError = pipe
         
@@ -512,7 +513,7 @@ class LogcatManager {
         do {
             try process.run()
         } catch {
-            self.errorMessage = "Error starting adb logcat: \(error.localizedDescription)\nADB path used: \(adbPath)\nMake sure adb is properly installed."
+            self.errorMessage = "Error starting adb logcat: \(error.localizedDescription)\nADB path used: \(adb.path)\nMake sure adb is properly installed."
         }
     }
     

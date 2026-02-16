@@ -34,7 +34,7 @@ class EmulatorManager {
     // MARK: - Emulator List
 
     func refreshEmulatorList() {
-        guard let skipPath = CommandFinder.findSkip() else {
+        guard let skip = CommandFinder.findSkip() else {
             listError = "Could not find skip executable."
             return
         }
@@ -44,7 +44,7 @@ class EmulatorManager {
 
         Task {
             do {
-                let output = try await runProcess(skipPath, arguments: ["android", "emulator", "list"])
+                let output = try await runProcess(skip, arguments: ["android", "emulator", "list"])
                 let names = output.split(separator: "\n")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
@@ -62,7 +62,7 @@ class EmulatorManager {
     // MARK: - Device Profiles
 
     func loadDeviceProfiles() {
-        guard let avdmanagerPath = CommandFinder.findAvdmanager() else {
+        guard let avdmanager = CommandFinder.findAvdmanager() else {
             profilesError = "Could not find avdmanager executable."
             return
         }
@@ -72,7 +72,7 @@ class EmulatorManager {
 
         Task {
             do {
-                let output = try await runProcess(avdmanagerPath, arguments: ["list", "device"])
+                let output = try await runProcess(avdmanager, arguments: ["list", "device"])
                 deviceProfiles = parseDeviceProfiles(output)
             } catch {
                 profilesError = "Failed to load device profiles: \(error.localizedDescription)"
@@ -84,7 +84,7 @@ class EmulatorManager {
     // MARK: - API Levels
 
     func loadAPILevels() {
-        guard let avdmanagerPath = CommandFinder.findAvdmanager() else {
+        guard let avdmanager = CommandFinder.findAvdmanager() else {
             levelsError = "Could not find avdmanager executable."
             return
         }
@@ -94,7 +94,7 @@ class EmulatorManager {
 
         Task {
             do {
-                let output = try await runProcess(avdmanagerPath, arguments: ["list", "target"])
+                let output = try await runProcess(avdmanager, arguments: ["list", "target"])
                 apiLevels = parseAPILevels(output)
             } catch {
                 levelsError = "Failed to load API levels: \(error.localizedDescription)"
@@ -106,7 +106,7 @@ class EmulatorManager {
     // MARK: - Create Emulator
 
     func createEmulator(name: String, deviceProfile: DeviceProfile, apiLevel: APILevel) {
-        guard let skipPath = CommandFinder.findSkip() else {
+        guard let skip = CommandFinder.findSkip() else {
             createOutput = "Error: Could not find skip executable."
             return
         }
@@ -121,10 +121,10 @@ class EmulatorManager {
             "--android-api-level", String(apiLevel.level)
         ]
 
-        createOutput = "$ \(formatCommandLine(skipPath, arguments: arguments))\n"
+        createOutput = "$ \(formatCommandLine(skip.path, arguments: arguments))\n"
 
         Task {
-            let success = await runProcessStreaming(skipPath, arguments: arguments)
+            let success = await runProcessStreaming(skip, arguments: arguments)
             isCreating = false
             refreshEmulatorList()
             if success {
@@ -136,17 +136,17 @@ class EmulatorManager {
     // MARK: - Delete Emulator
 
     func deleteEmulator(_ name: String) {
-        guard let avdmanagerPath = CommandFinder.findAvdmanager() else {
+        guard let avdmanager = CommandFinder.findAvdmanager() else {
             listError = "Could not find avdmanager executable."
             return
         }
 
         let arguments = ["delete", "avd", "-n", name]
-        appendCommand(avdmanagerPath, arguments: arguments)
+        appendCommand(avdmanager.path, arguments: arguments)
 
         Task {
             do {
-                let output = try await runProcess(avdmanagerPath, arguments: arguments)
+                let output = try await runProcess(avdmanager, arguments: arguments)
                 appendOutput(output)
                 refreshEmulatorList()
             } catch {
@@ -159,21 +159,21 @@ class EmulatorManager {
     // MARK: - Launch Emulator
 
     func launchEmulator(_ name: String? = nil, showOutput: Bool = true) {
-        guard let skipPath = CommandFinder.findSkip() else { return }
+        guard let skip = CommandFinder.findSkip() else { return }
 
         var arguments = ["android", "emulator", "launch"]
         if let name {
             arguments += ["--name", name]
         }
         if showOutput {
-            appendCommand(skipPath, arguments: arguments)
+            appendCommand(skip.path, arguments: arguments)
         }
 
         Task {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: skipPath)
+            process.executableURL = URL(fileURLWithPath: skip.path)
             process.arguments = arguments
-            process.environment = Self.processEnvironment
+            process.environment = skip.environment
             process.standardOutput = Pipe()
             process.standardError = Pipe()
             try? process.run()
@@ -197,20 +197,14 @@ class EmulatorManager {
 
     // MARK: - Private Helpers
 
-    private static let processEnvironment: [String: String] = {
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = CommandFinder.toolPATH
-        return env
-    }()
-
-    private func runProcess(_ path: String, arguments: [String]) async throws -> String {
+    private func runProcess(_ command: FoundCommand, arguments: [String]) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
 
-            process.executableURL = URL(fileURLWithPath: path)
+            process.executableURL = URL(fileURLWithPath: command.path)
             process.arguments = arguments
-            process.environment = Self.processEnvironment
+            process.environment = command.environment
             process.standardOutput = pipe
             process.standardError = pipe
 
@@ -238,14 +232,14 @@ class EmulatorManager {
         }
     }
 
-    private func runProcessStreaming(_ path: String, arguments: [String]) async -> Bool {
+    private func runProcessStreaming(_ command: FoundCommand, arguments: [String]) async -> Bool {
         await withCheckedContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
 
-            process.executableURL = URL(fileURLWithPath: path)
+            process.executableURL = URL(fileURLWithPath: command.path)
             process.arguments = arguments
-            process.environment = Self.processEnvironment
+            process.environment = command.environment
             process.standardOutput = pipe
             process.standardError = pipe
 
