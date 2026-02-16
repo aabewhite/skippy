@@ -10,6 +10,7 @@ class EmulatorManager {
     var commandOutput: String = ""
     var isCommandRunning: Bool = false
     var listError: String?
+    var showDeviceAlreadyRunning: Bool = false
 
     // MARK: - Emulator List
 
@@ -70,17 +71,35 @@ class EmulatorManager {
     func launchEmulator(_ name: String? = nil) {
         guard let skip = CommandFinder.findSkip() else { return }
 
-        var arguments = ["android", "emulator", "launch", "--background"]
-        if let name {
-            arguments += ["--name", name]
-        }
-
-        appendCommand(skip, arguments: arguments)
-        isCommandRunning = true
-
         Task {
-            await runCommandOutputStreaming(skip, arguments: arguments)
+            if await isDeviceRunning() {
+                showDeviceAlreadyRunning = true
+                return
+            }
+
+            var arguments = ["android", "emulator", "launch", "--background"]
+            if let name {
+                arguments += ["--name", name]
+            }
+
+            appendCommand(skip, arguments: arguments)
+            isCommandRunning = true
+            await runCommandOutputStreaming(skip, arguments: arguments, timeout: .seconds(3))
             isCommandRunning = false
+        }
+    }
+
+    private func isDeviceRunning() async -> Bool {
+        guard let adb = CommandFinder.findAdb() else { return false }
+        do {
+            let output = try await adb.run(arguments: ["devices"])
+            let devices = output.split(separator: "\n")
+                .dropFirst() // skip "List of devices attached" header
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return !devices.isEmpty
+        } catch {
+            return false
         }
     }
 
@@ -97,7 +116,8 @@ class EmulatorManager {
 
     // MARK: - Private Helpers
 
-    private func runCommandOutputStreaming(_ command: FoundCommand, arguments: [String]) async {
+    private func runCommandOutputStreaming(_ command: FoundCommand, arguments: [String], timeout: Duration? = nil) async {
+        let once = OnceFlag()
         await withCheckedContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
@@ -118,7 +138,9 @@ class EmulatorManager {
 
             process.terminationHandler = { _ in
                 pipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume()
+                Task { @MainActor in
+                    if once.tryFire() { continuation.resume() }
+                }
             }
 
             do {
@@ -127,8 +149,31 @@ class EmulatorManager {
                 Task { @MainActor [weak self] in
                     self?.commandOutput += "Error: \(error.localizedDescription)\n"
                 }
-                continuation.resume()
+                if once.tryFire() { continuation.resume() }
+                return
+            }
+
+            if let timeout {
+                Task {
+                    try? await Task.sleep(for: timeout)
+                    pipe.fileHandleForReading.readabilityHandler = nil
+                    if once.tryFire() { continuation.resume() }
+                }
             }
         }
+    }
+}
+
+/// Thread-safe flag ensuring a one-shot action fires exactly once.
+private final class OnceFlag: @unchecked Sendable {
+    private var fired = false
+    private let lock = NSLock()
+
+    func tryFire() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if fired { return false }
+        fired = true
+        return true
     }
 }

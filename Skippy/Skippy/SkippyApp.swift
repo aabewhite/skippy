@@ -23,6 +23,12 @@ struct SkippyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(emulatorManager)
+                .alert("Device Already Running", isPresented: $emulatorManager.showDeviceAlreadyRunning) {
+                    Button("OK") { }
+                } message: {
+                    Text("A device or emulator is already running. Please stop it before launching another.")
+                }
         }
         .commands {
             CommandMenu("Debug") {
