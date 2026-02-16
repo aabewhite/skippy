@@ -70,7 +70,7 @@ class EmulatorManager {
     func launchEmulator(_ name: String? = nil) {
         guard let skip = CommandFinder.findSkip() else { return }
 
-        var arguments = ["android", "emulator", "launch"]
+        var arguments = ["android", "emulator", "launch", "--background"]
         if let name {
             arguments += ["--name", name]
         }
