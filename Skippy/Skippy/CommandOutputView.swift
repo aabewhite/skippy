@@ -8,6 +8,8 @@ import AppKit
 struct CommandOutputView: NSViewRepresentable {
     let text: String
     let fontSize: CGFloat
+    var colorizeCheckupLines: Bool = false
+    var logFileURL: URL? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -19,12 +21,18 @@ struct CommandOutputView: NSViewRepresentable {
 
         textView.isEditable = false
         textView.isSelectable = true
+        textView.isAutomaticLinkDetectionEnabled = false
         textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.backgroundColor = NSColor.textBackgroundColor
+        textView.delegate = context.coordinator
+        textView.linkTextAttributes = [
+            .foregroundColor: NSColor.systemBlue,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
@@ -50,11 +58,16 @@ struct CommandOutputView: NSViewRepresentable {
         guard let textStorage = textView.textStorage else { return }
 
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.labelColor
-        ]
-        textStorage.setAttributedString(NSAttributedString(string: text, attributes: attrs))
+
+        if colorizeCheckupLines {
+            textStorage.setAttributedString(colorizedCheckupString(text: text, font: font, logFileURL: logFileURL))
+        } else {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.labelColor
+            ]
+            textStorage.setAttributedString(NSAttributedString(string: text, attributes: attrs))
+        }
 
         if context.coordinator.isAtBottom {
             layoutManager.ensureLayout(for: textContainer)
@@ -66,7 +79,46 @@ struct CommandOutputView: NSViewRepresentable {
         }
     }
 
-    class Coordinator {
+    private func colorizedCheckupString(text: String, font: NSFont, logFileURL: URL?) -> NSAttributedString {
+        let defaultAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
+        let result = NSMutableAttributedString()
+
+        let lines = text.components(separatedBy: "\n")
+        for (index, line) in lines.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n", attributes: defaultAttrs))
+            }
+
+            let color: NSColor
+            if line.hasPrefix("[✓]") {
+                color = .systemGreen
+            } else if line.hasPrefix("[✗]") {
+                color = .systemRed
+            } else if line.hasPrefix("[!]") {
+                color = .systemOrange
+            } else {
+                color = .labelColor
+            }
+
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            result.append(NSAttributedString(string: line, attributes: attrs))
+        }
+
+        if let url = logFileURL {
+            result.append(NSAttributedString(string: "\n", attributes: defaultAttrs))
+            let linkAttrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.systemBlue,
+                .link: url
+            ]
+            result.append(NSAttributedString(string: "[→] Open Output Log", attributes: linkAttrs))
+            result.append(NSAttributedString(string: "\n", attributes: defaultAttrs))
+        }
+
+        return result
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
         var isProgrammaticScroll = false
         var isAtBottom = true
 
@@ -83,6 +135,14 @@ struct CommandOutputView: NSViewRepresentable {
                 isAtBottom = atBottom
             }
         }
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            if let url = link as? URL {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            return false
+        }
     }
 }
 
@@ -91,6 +151,8 @@ struct AnimatedCommandOutputView: View {
     let text: String
     let fontSize: CGFloat
     var isExecuting: Bool = false
+    var colorizeCheckupLines: Bool = false
+    var logFileURL: URL? = nil
 
     @State private var dotCount = 0
 
@@ -103,7 +165,7 @@ struct AnimatedCommandOutputView: View {
     }
 
     var body: some View {
-        CommandOutputView(text: displayText, fontSize: fontSize)
+        CommandOutputView(text: displayText, fontSize: fontSize, colorizeCheckupLines: colorizeCheckupLines, logFileURL: logFileURL)
             .task(id: isExecuting) {
                 guard isExecuting else { return }
                 dotCount = 0

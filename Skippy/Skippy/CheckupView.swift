@@ -14,26 +14,13 @@ struct CheckupView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            AnimatedCommandOutputView(
-                text: manager.commandOutput,
-                fontSize: fontSize,
-                isExecuting: manager.isRunning
-            )
-
-            if !manager.isRunning, let logFilePath = manager.logFilePath {
-                HStack {
-                    Button("Open Log File") {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: logFilePath))
-                    }
-                    .buttonStyle(.link)
-                    .padding(.leading, 12)
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-                .background(.bar)
-            }
-        }
+        AnimatedCommandOutputView(
+            text: manager.commandOutput,
+            fontSize: fontSize,
+            isExecuting: manager.isRunning,
+            colorizeCheckupLines: true,
+            logFileURL: manager.isRunning ? nil : manager.logFilePath.map { URL(fileURLWithPath: $0) }
+        )
         .frame(minWidth: 600, minHeight: 400)
         .background(WindowFrameSaver(name: "\(command.rawValue)Window"))
         .navigationTitle(command == .doctor ? "Doctor" : "Checkup")
