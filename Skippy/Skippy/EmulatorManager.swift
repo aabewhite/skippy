@@ -95,7 +95,7 @@ class EmulatorManager {
         Task {
             do {
                 let output = try await runProcess(avdmanager, arguments: ["list", "target"])
-                apiLevels = parseAPILevels(output)
+                apiLevels = ensureDefaultAPILevels(parseAPILevels(output))
             } catch {
                 levelsError = "Failed to load API levels: \(error.localizedDescription)"
             }
@@ -325,6 +325,17 @@ class EmulatorManager {
         }
 
         return levels
+    }
+
+    private static let defaultAPILevels = [33, 34, 35, 36]
+
+    private func ensureDefaultAPILevels(_ parsed: [APILevel]) -> [APILevel] {
+        let existingLevels = Set(parsed.map(\.level))
+        var result = parsed
+        for level in Self.defaultAPILevels where !existingLevels.contains(level) {
+            result.append(APILevel(id: "android-\(level)", name: "Android API \(level)", level: level))
+        }
+        return result.sorted { $0.level < $1.level }
     }
 
     private func extractQuoted(from text: String) -> String? {
