@@ -62,11 +62,16 @@ struct NewEmulatorView: View {
         .navigationTitle("New Emulator")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Create") {
-                    guard let profile = selectedProfile, let apiLevel = selectedAPILevel else { return }
-                    manager.createEmulator(name: name, deviceProfile: profile, apiLevel: apiLevel)
+                if manager.isCreating {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Button("Create") {
+                        guard let profile = selectedProfile, let apiLevel = selectedAPILevel else { return }
+                        manager.createEmulator(name: name, deviceProfile: profile, apiLevel: apiLevel)
+                    }
+                    .disabled(selectedProfile == nil || selectedAPILevel == nil || name.isEmpty)
                 }
-                .disabled(selectedProfile == nil || selectedAPILevel == nil || name.isEmpty || manager.isCreating)
             }
         }
         .onChange(of: selectedProfile) {
