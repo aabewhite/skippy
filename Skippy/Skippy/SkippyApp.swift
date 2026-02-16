@@ -36,6 +36,16 @@ struct SkippyApp: App {
                     openWindow(id: "logcat")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Doctor") {
+                    openWindow(id: "doctor")
+                }
+
+                Button("Checkup") {
+                    openWindow(id: "checkup")
+                }
             }
 
             CommandMenu("Emulator") {
@@ -109,6 +119,16 @@ struct SkippyApp: App {
                 .environment(createEmulatorManager)
         }
         .defaultSize(width: 550, height: 500)
+
+        WindowGroup("Doctor", id: "doctor") {
+            CheckupView(command: .doctor)
+        }
+        .defaultSize(width: 800, height: 600)
+
+        WindowGroup("Checkup", id: "checkup") {
+            CheckupView(command: .checkup)
+        }
+        .defaultSize(width: 800, height: 600)
 
         Settings {
             SettingsView()

@@ -29,6 +29,8 @@ Managed by `SkippyApp`, which creates manager instances as `@State` and injects 
 - **Logcat window** (Cmd+Shift+L) → `LogcatView`
 - **Emulators window** (Cmd+Shift+E) → `EmulatorView`
 - **New Emulator window** (via Create button) → `NewEmulatorView`
+- **Doctor window** (Debug menu) → `CheckupView(command: .doctor)`
+- **Checkup window** (Debug menu) → `CheckupView(command: .checkup)`
 - **Settings** → `SettingsView`
 
 ### Key Components
@@ -41,6 +43,8 @@ Managed by `SkippyApp`, which creates manager instances as `@State` and injects 
 - **EmulatorView.swift** — Emulator list with toolbar actions (Create, Refresh, Launch, Delete) and command output panel.
 - **NewEmulatorView.swift** — Form for creating emulators with device profile/API level pickers and streaming output.
 - **CommandOutputView.swift** — Reusable `NSViewRepresentable` for scrolling monospaced command output with auto-scroll. `AnimatedCommandOutputView` wrapper adds an "Executing..." indicator.
+- **CheckupManager.swift** — Runs `skip doctor` and `skip checkup` commands with streaming output and log file support.
+- **CheckupView.swift** — Shared view for Doctor and Checkup windows with command output, copy/save toolbar actions, and log file link.
 - **SettingsView.swift** — App settings (logcat buffer size).
 
 ### Concurrency Model
