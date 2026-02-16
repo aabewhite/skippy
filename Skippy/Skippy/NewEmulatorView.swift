@@ -3,10 +3,16 @@ import SwiftUI
 struct NewEmulatorView: View {
     @Environment(EmulatorManager.self) private var manager
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("fontSizeOffset") private var fontSizeOffset: Int = 0
     @State private var selectedProfile: DeviceProfile?
     @State private var selectedAPILevel: APILevel?
     @State private var name: String = ""
     @State private var isAutoUpdatingName: Bool = true
+
+    private static let baseFontSize: CGFloat = 11
+    private var fontSize: CGFloat {
+        max(6, min(30, Self.baseFontSize + CGFloat(fontSizeOffset)))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,7 +48,7 @@ struct NewEmulatorView: View {
                 Divider()
                 ScrollView {
                     Text(manager.createOutput)
-                        .font(.system(.body, design: .monospaced))
+                        .font(.system(size: fontSize, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
                         .textSelection(.enabled)
