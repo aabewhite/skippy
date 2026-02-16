@@ -41,15 +41,8 @@ struct EmulatorView: View {
 
             if !manager.commandOutput.isEmpty {
                 Divider()
-                ScrollView {
-                    Text(manager.commandOutput)
-                        .font(.system(size: fontSize, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .textSelection(.enabled)
-                }
-                .frame(maxHeight: 200)
-                .background(Color(nsColor: .textBackgroundColor))
+                CommandOutputView(text: manager.commandOutput, fontSize: fontSize)
+                    .frame(maxHeight: 200)
             }
         }
         .frame(minWidth: 500, minHeight: 200)
